@@ -53,6 +53,7 @@ COUNTERS_PORT_NAME_MAP = "COUNTERS_PORT_NAME_MAP"
 PORT_STATUS_TABLE_PREFIX = "PORT_TABLE:"
 PORT_OPER_STATUS_FIELD = "oper_status"
 PORT_ADMIN_STATUS_FIELD = "admin_status"
+
 class Portstat(object):
     def __init__(self):
         self.db = swsssdk.SonicV2Connector(host='127.0.0.1')

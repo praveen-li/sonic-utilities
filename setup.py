@@ -10,12 +10,9 @@ setup(
     url='https://github.com/Azure/sonic-utilities',
     maintainer='Joe LeVeque',
     maintainer_email='jolevequ@microsoft.com',
-    packages=['config', 'show', 'Clear', 'debug', 'undebug', 'sonic_eeprom', 'sonic_sfp', "sonic_installer"],
+    packages=['config', 'show', 'sonic_eeprom', 'sonic_sfp', "sonic_installer"],
     package_data={
-        'show': ['aliases.ini'],
-	'Clear': ['aliases.ini'],
-	'debug': ['aliases.ini'],
-	'undebug': ['aliases.ini'],
+        'show': ['aliases.ini']
     },
     scripts=[
         'scripts/aclshow',
@@ -30,24 +27,17 @@ setup(
         'scripts/portstat',
         'scripts/sfputil',
         'scripts/teamshow', 
-	'scripts/interface_stat',
     ],
     data_files=[
         ('/etc/bash_completion.d', ['data/etc/bash_completion.d/config']),
         ('/etc/bash_completion.d', ['data/etc/bash_completion.d/show']),
-	('/etc/bash_completion.d', ['data/etc/bash_completion.d/sonic_installer']),
-        ('/etc/bash_completion.d', ['data/etc/bash_completion.d/Clear']),
-	('/etc/bash_completion.d', ['data/etc/bash_completion.d/debug']),
-	('/etc/bash_completion.d', ['data/etc/bash_completion.d/undebug']),
+        ('/etc/bash_completion.d', ['data/etc/bash_completion.d/sonic_installer']),
     ],
     entry_points={
         'console_scripts': [
             'config = config.main:cli',
             'show = show.main:cli',
-	    'Clear = Clear.main:cli',
-	    'debug = debug.main:cli',
-            'undebug = undebug.main:cli',
-            'sonic_installer = sonic_installer.main:cli',
+            'sonic_installer = sonic_installer.main:cli'
         ]
     },
     install_requires=[
