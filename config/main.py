@@ -6,6 +6,7 @@ import click
 import json
 import subprocess
 from swsssdk import ConfigDBConnector
+from minigraph import parse_device_desc_xml
 
 SONIC_CFGGEN_PATH = "sonic-cfggen"
 MINIGRAPH_PATH = "/etc/sonic/minigraph.xml"
@@ -15,24 +16,20 @@ MINIGRAPH_BGP_SESSIONS = "minigraph_bgp"
 # Helper functions
 #
 
-def run_command(command, pager=False, display_cmd=False):
+def run_command(command, display_cmd=False):
     """Run bash command and print output to stdout
     """
     if display_cmd == True:
         click.echo(click.style("Running command: ", fg='cyan') + click.style(command, fg='green'))
 
-    p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE)
-    stdout = p.communicate()[0]
-    p.wait()
+    proc = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE)
+    (out, err) = proc.communicate()
 
-    if len(stdout) > 0:
-        if pager is True:
-            click.echo_via_pager(p.stdout.read())
-        else:
-            click.echo(p.stdout.read())
+    if len(out) > 0:
+        click.echo(out)
 
-    if p.returncode != 0:
-        sys.exit(p.returncode)
+    if proc.returncode != 0:
+        sys.exit(proc.returncode)
 
 def _is_neighbor_ipaddress(ipaddress):
     """Returns True if a neighbor has the IP address <ipaddress>, False if not
@@ -82,6 +79,14 @@ def _switch_bgp_session_status(ipaddr_or_hostname, status, verbose):
         raise click.Abort
     _switch_bgp_session_status_by_addr(ipaddress, status, verbose)
 
+def _change_hostname(hostname):
+    current_hostname = os.uname()[1]
+    if current_hostname != hostname:
+        run_command('echo {} > /etc/hostname'.format(hostname), display_cmd=True)
+        run_command('hostname -F /etc/hostname', display_cmd=True)
+        run_command('sed -i "/\s{}$/d" /etc/hosts'.format(current_hostname), display_cmd=True)
+        run_command('echo "127.0.0.1 {}" >> /etc/hosts'.format(hostname), display_cmd=True)
+
 # Callback for confirmation prompt. Aborts if user enters "n"
 def _abort_if_false(ctx, param, value):
     if not value:
@@ -111,6 +116,48 @@ def load(filename):
     """Import a previous saved config DB dump file."""
     command = "{} -j {} --write-to-db".format(SONIC_CFGGEN_PATH, filename)
     run_command(command, display_cmd=True)
+
+@cli.command()
+@click.option('-y', '--yes', is_flag=True, callback=_abort_if_false,
+                expose_value=False, prompt='Reload mgmt config?')
+@click.argument('filename', default='/etc/sonic/device_desc.xml', type=click.Path(exists=True))
+def load_mgmt_config(filename):
+    """Reconfigure hostname and mgmt interface based on device description file."""
+    command = "{} -M {} --write-to-db".format(SONIC_CFGGEN_PATH, filename)
+    run_command(command, display_cmd=True)
+    #FIXME: After config DB daemon for hostname and mgmt interface is implemented, we'll no longer need to do manual configuration here
+    config_data = parse_device_desc_xml(filename)
+    hostname = config_data['minigraph_hostname']
+    _change_hostname(hostname)
+    mgmt_conf = config_data['minigraph_mgmt_interface']
+    command = "ifconfig eth0 {} netmask {}".format(str(mgmt_conf['addr']), str(mgmt_conf['mask']))
+    run_command(command, display_cmd=True)
+    command = "[ -f /var/run/dhclient.eth0.pid ] && kill `cat /var/run/dhclient.eth0.pid` && rm -f /var/run/dhclient.eth0.pid"
+    run_command(command, display_cmd=True)
+
+@cli.command()
+@click.option('-y', '--yes', is_flag=True, callback=_abort_if_false,
+                expose_value=False, prompt='Reload config from minigraph?')
+def load_minigraph():
+    """Reconfigure based on minigraph."""
+    command = "{} -m --write-to-db".format(SONIC_CFGGEN_PATH)
+    run_command(command, display_cmd=True)
+    command = "{} -m -v minigraph_hostname".format(SONIC_CFGGEN_PATH)
+    p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE)
+    p.wait()
+    hostname = p.communicate()[0].strip()
+    _change_hostname(hostname)
+    #FIXME: After config DB daemon is implemented, we'll no longer need to restart every service.
+    run_command("service interfaces-config restart", display_cmd=True)
+    run_command("service ntp-config restart", display_cmd=True)
+    run_command("service rsyslog-config restart", display_cmd=True)
+    run_command("service swss restart", display_cmd=True)
+    run_command("service bgp restart", display_cmd=True)
+    run_command("service teamd restart", display_cmd=True)
+    run_command("service pmon restart", display_cmd=True)
+    run_command("service lldp restart", display_cmd=True)
+    run_command("service snmp restart", display_cmd=True)
+    run_command("service dhcp_relay restart", display_cmd=True)
 
 #
 # 'bgp' group
