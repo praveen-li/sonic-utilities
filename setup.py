@@ -10,7 +10,7 @@ setup(
     url='https://github.com/Azure/sonic-utilities',
     maintainer='Joe LeVeque',
     maintainer_email='jolevequ@microsoft.com',
-    packages=['config', 'sfputil', 'show', 'sonic_eeprom', 'sonic_sfp', "sonic_installer"],
+    packages=['config', 'sfputil', 'show', 'clear', 'debug', 'undebug','sonic_eeprom', 'sonic_installer', 'sonic_sfp'],
     package_data={
         'show': ['aliases.ini']
     },
@@ -24,6 +24,7 @@ setup(
         'scripts/fast-reboot-dump.py',
         'scripts/fdbshow',
         'scripts/generate_dump',
+        'scripts/interface_stat',
         'scripts/lldpshow',
         'scripts/portstat',
         'scripts/teamshow', 
@@ -39,7 +40,10 @@ setup(
             'config = config.main:cli',
             'sfputil = sfputil.main:cli',
             'show = show.main:cli',
-            'sonic_installer = sonic_installer.main:cli'
+            'sonic-clear = clear.main:cli',
+            'sonic_installer = sonic_installer.main:cli',
+            'debug = debug.main:cli',
+            'undebug = undebug.main:cli',
         ]
     },
     install_requires=[
