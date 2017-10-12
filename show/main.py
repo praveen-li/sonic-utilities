@@ -223,7 +223,7 @@ def description(interfacename):
      else:
         command = "sudo vtysh -c 'show interface description'"
 
-    run_command(command)
+     run_command(command)
 
 
 # 'counters' subcommand ("show interfaces counters")
