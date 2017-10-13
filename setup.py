@@ -27,7 +27,8 @@ setup(
         'scripts/interface_stat',
         'scripts/lldpshow',
         'scripts/portstat',
-        'scripts/teamshow', 
+        'scripts/teamshow',
+        'scripts/config-hwsku.sh',
     ],
     data_files=[
         ('/etc/bash_completion.d', ['data/etc/bash_completion.d/config']),
