@@ -176,6 +176,7 @@ def interfaces():
 @click.argument('interfacename', required=False)
 def alias(interfacename):
     """Show Interface Name/Alias Mapping"""
+
     command = 'sonic-cfggen -d --var-json "PORT"'
     p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE)
 
@@ -185,14 +186,22 @@ def alias(interfacename):
     body = []
 
     if interfacename is not None:
+        # If we're given an interface name, output name and alias for that interface only
         if interfacename in port_dict:
-            body.append([interfacename, port_dict[interfacename]['alias']])
+            if 'alias' in port_dict[interfacename]:
+                body.append([interfacename, port_dict[interfacename]['alias']])
+            else:
+                body.append([interfacename, interfacename])
         else:
             click.echo("Invalid interface name, '{0}'".format(interfacename))
             return
     else:
+        # Output name and alias for all interfaces
         for port_name in natsorted(port_dict.keys()):
-            body.append([port_name, port_dict[port_name]['alias']])
+            if 'alias' in port_dict[port_name]:
+                body.append([port_name, port_dict[port_name]['alias']])
+            else:
+                body.append([port_name, port_name])
 
     click.echo(tabulate(body, header))
 
@@ -212,15 +221,16 @@ def summary(interfacename):
         run_command(command)
 
 
-@interfaces.group(cls=AliasedGroup, default_if_no_args=True)
+@interfaces.group(cls=AliasedGroup, default_if_no_args=False)
 def transceiver():
+    """Show SFP Transceiver information"""
     pass
 
 
-@transceiver.command(default=True)
+@transceiver.command()
 @click.argument('interfacename', required=False)
-def default(interfacename):
-    """Show interface transceiver information"""
+def basic(interfacename):
+    """Show basic interface transceiver information"""
 
     command = "sudo sfputil show eeprom"
 
@@ -230,9 +240,10 @@ def default(interfacename):
     run_command(command)
 
 @transceiver.command()
-@click.argument('interfacename', required=True)
+@click.argument('interfacename', required=False)
 def details(interfacename):
     """Show interface transceiver details (Digital Optical Monitoring)"""
+
     command = "sudo sfputil show eeprom --dom"
 
     if interfacename is not None:
@@ -243,9 +254,11 @@ def details(interfacename):
 @interfaces.command()
 @click.argument('interfacename', required=False)
 def description(interfacename):
-     if interfacename is not None:
+    """Show interface status, protocol and description"""
+
+    if interfacename is not None:
         command = "sudo vtysh -c 'show interface {}'".format(interfacename)
-     else:
+    else:
         command = "sudo vtysh -c 'show interface description'"
 
      run_command(command)
@@ -524,13 +537,13 @@ def environment():
 # 'processes' group ("show processes ...")
 #
 
-@cli.group(cls=AliasedGroup, default_if_no_args=True)
+@cli.group(cls=AliasedGroup, default_if_no_args=False)
 def processes():
     """Display process information"""
     pass
 
-@processes.command(default=True)
-def default():
+@processes.command()
+def summary():
     """Show processes info"""
     # Run top batch mode to prevent unexpected newline after each newline
     run_command('ps -eo pid,ppid,cmd,%mem,%cpu ')
@@ -708,6 +721,61 @@ def services():
                 print proc1.stdout.read()
         else:
                 break
+
+#
+# 'session' command ###
+#
+
+@cli.command()
+@click.argument('session_name', required=False)
+def session(session_name):
+    """Show existing everflow sessions"""
+    if session_name is None:
+        session_name = ""
+
+    run_command("acl-loader show session {}".format(session_name))
+
+
+#
+# 'acl' group ###
+#
+
+@cli.group(cls=AliasedGroup, default_if_no_args=False)
+def acl():
+    """Show ACL related information"""
+    pass
+
+
+#
+# 'acl table' command ###
+#
+
+@acl.command()
+@click.argument('table_name', required=False)
+def table(table_name):
+    """Show existing ACL tables"""
+    if table_name is None:
+        table_name = ""
+
+    run_command("acl-loader show table {}".format(table_name))
+
+
+#
+# 'acl rule' command ###
+#
+
+@acl.command()
+@click.argument('table_name', required=False)
+@click.argument('rule_id', required=False)
+def rule(table_name, rule_id):
+    """Show existing ACL rules"""
+    if table_name is None:
+        table_name = ""
+
+    if rule_id is None:
+        rule_id = ""
+
+    run_command("acl-loader show rule {} {}".format(table_name, rule_id))
 
 if __name__ == '__main__':
     cli()

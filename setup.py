@@ -1,4 +1,11 @@
+import glob
 from setuptools import setup
+import unittest
+
+def get_test_suite():
+    test_loader = unittest.TestLoader()
+    test_suite = test_loader.discover('sonic-utilities-tests', pattern='*.py')
+    return test_suite
 
 setup(
     name='sonic-utilities',
@@ -10,7 +17,7 @@ setup(
     url='https://github.com/Azure/sonic-utilities',
     maintainer='Joe LeVeque',
     maintainer_email='jolevequ@microsoft.com',
-    packages=['config', 'sfputil', 'show', 'clear', 'debug', 'undebug','sonic_eeprom', 'sonic_installer', 'sonic_sfp'],
+    packages=['config', 'sfputil', 'show', 'clear', 'debug', 'undebug','sonic_eeprom', 'sonic_installer', 'sonic_psu', 'sonic_sfp', 'acl_loader', 'sonic-utilities-tests'],
     package_data={
         'show': ['aliases.ini']
     },
@@ -26,15 +33,13 @@ setup(
         'scripts/generate_dump',
         'scripts/interface_stat',
         'scripts/lldpshow',
+        'scripts/port2alias',
         'scripts/portstat',
         'scripts/teamshow',
         'scripts/config-hwsku.sh',
     ],
     data_files=[
-        ('/etc/bash_completion.d', ['data/etc/bash_completion.d/config']),
-        ('/etc/bash_completion.d', ['data/etc/bash_completion.d/sfputil']),
-        ('/etc/bash_completion.d', ['data/etc/bash_completion.d/show']),
-        ('/etc/bash_completion.d', ['data/etc/bash_completion.d/sonic_installer']),
+        ('/etc/bash_completion.d', glob.glob('data/etc/bash_completion.d/*')),
     ],
     entry_points={
         'console_scripts': [
@@ -45,6 +50,8 @@ setup(
             'sonic_installer = sonic_installer.main:cli',
             'debug = debug.main:cli',
             'undebug = undebug.main:cli',
+            'sonic_installer = sonic_installer.main:cli',
+            'acl-loader = acl_loader.main:cli'
         ]
     },
     install_requires=[
@@ -66,4 +73,5 @@ setup(
         'Topic :: Utilities',
     ],
     keywords='sonic SONiC utilities command line cli CLI',
+    test_suite='setup.get_test_suite'
 )
