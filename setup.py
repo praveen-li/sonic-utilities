@@ -47,7 +47,6 @@ setup(
             'sfputil = sfputil.main:cli',
             'show = show.main:cli',
             'sonic-clear = clear.main:cli',
-            'sonic_installer = sonic_installer.main:cli',
             'debug = debug.main:cli',
             'undebug = undebug.main:cli',
             'sonic_installer = sonic_installer.main:cli',
