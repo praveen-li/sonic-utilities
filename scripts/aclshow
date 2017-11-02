@@ -65,7 +65,7 @@ class AclStat(object):
 
         # Set up db connections
         self.db = swsssdk.SonicV2Connector(host="127.0.0.1")
-        self.db.connect(self.db.APPL_DB)
+        self.db.connect(self.db.CONFIG_DB)
         self.db.connect(self.db.COUNTERS_DB)
 
         self.read_port_map()
@@ -127,7 +127,7 @@ class AclStat(object):
             """
             Get ACL tables from the DB
             """
-            tables = self.db.keys(self.db.APPL_DB, "ACL_TABLE:*")
+            tables = self.db.keys(self.db.CONFIG_DB, "ACL_TABLE|*")
 
             if verboseflag:
                 print("ACL Tables found:", len(tables))
@@ -136,11 +136,11 @@ class AclStat(object):
                 return
 
             for table in tables:
-                table_name = table.split(":")[1]
+                table_name = table.split("|")[1]
                 if self.table_list and not table_name in self.table_list:
                         continue
 
-                table_props = self.db.get_all(self.db.APPL_DB, table)
+                table_props = self.db.get_all(self.db.CONFIG_DB, table)
 
                 if self.port_list:
                     table_port_list = table_props['ports'].split(",")
@@ -156,7 +156,7 @@ class AclStat(object):
             Get ACL rules from the DB
             """
             for table_name in self.acl_tables.keys():
-                rules = self.db.keys(self.db.APPL_DB, "ACL_RULE_TABLE:%s:*" % table_name)
+                rules = self.db.keys(self.db.CONFIG_DB, "ACL_RULE|%s|*" % table_name)
                 if not rules:
                     if verboseflag:
                         print("No ACL rules found in %s" % table_name)
@@ -167,10 +167,10 @@ class AclStat(object):
                     print("ACL Rules found in %s:" % table_name, rules_cnt)
 
                 for rule in rules:
-                    rule_name = rule.split(":")[2]
+                    rule_name = rule.split("|")[2]
                     if self.rule_list and not rule_name in self.rule_list:
                             continue
-                    rule_props = lowercase_keys(self.db.get_all(self.db.APPL_DB, rule))
+                    rule_props = lowercase_keys(self.db.get_all(self.db.CONFIG_DB, rule))
                     rule_props["table"] = table_name
                     self.acl_rules[table_name, rule_name] = rule_props
 
