@@ -685,7 +685,7 @@ def clock():
 @cli.command('system-memory')
 def system_memory():
     """Show memory information"""
-    command="free -m"
+    command="free -m -h"
     run_command(command)
 
 @cli.group(cls=AliasedGroup, default_if_no_args=False)
