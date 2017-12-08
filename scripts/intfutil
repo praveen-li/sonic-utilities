@@ -53,15 +53,15 @@ def db_port_status_get(db, intf_name, status_type):
     if status is None:
         return "N/A"
 
-   if status_type == PORT_SPEED and status != "N/A":
-       status = '{}G'.format(status[:2] if int(status) < 100000 else status[:3])
+    if status_type == PORT_SPEED and status != "N/A":
+        status = '{}G'.format(status[:2] if int(status) < 100000 else status[:3])
 
     return status
 
 
 # ========================== interface-status logic ==========================
 
-header_stat = ['Interface', 'Lanes', 'Speed', 'MTU', 'Alias', 'Oper', 'Admin']
+header_stat = ['Interface', 'Admin', 'Oper',  'Alias', 'Lanes', 'Speed', 'MTU']
 
 class IntfStatus(object):
 
@@ -82,12 +82,12 @@ class IntfStatus(object):
             key = re.split(':', i, maxsplit=1)[-1].strip()
             if key and key.startswith('Ethernet'):
                 table.append((key,
+                              db_port_status_get(self.db, key, PORT_ADMIN_STATUS),
+                              db_port_status_get(self.db, key, PORT_OPER_STATUS),
+                              db_port_status_get(self.db, key, PORT_ALIAS),
                               db_port_status_get(self.db, key, PORT_LANES_STATUS),
                               db_port_status_get(self.db, key, PORT_SPEED),
-                              db_port_status_get(self.db, key, PORT_MTU_STATUS),
-                              db_port_status_get(self.db, key, PORT_ALIAS),
-                              db_port_status_get(self.db, key, PORT_OPER_STATUS),
-                              db_port_status_get(self.db, key, PORT_ADMIN_STATUS)))
+                              db_port_status_get(self.db, key, PORT_MTU_STATUS)))
 
         # Sorting and tabulating the result table.
         sorted_table = natsorted(table)
@@ -110,7 +110,7 @@ class IntfStatus(object):
 # ========================== interface-description logic ==========================
 
 
-header_desc = ['Interface', 'Oper', 'Admin', 'Alias', 'Description']
+header_desc = ['Interface', 'Admin', 'Oper', 'Alias', 'Description']
 
 
 class IntfDescription(object):
@@ -132,8 +132,8 @@ class IntfDescription(object):
             key = re.split(':', i, maxsplit=1)[-1].strip()
             if key and key.startswith('Ethernet'):
                 table.append((key,
-                              db_port_status_get(self.db, key, PORT_OPER_STATUS),
                               db_port_status_get(self.db, key, PORT_ADMIN_STATUS),
+                              db_port_status_get(self.db, key, PORT_OPER_STATUS),
                               db_port_status_get(self.db, key, PORT_ALIAS),
                               db_port_status_get(self.db, key, PORT_DESCRIPTION)))
 
