@@ -57,12 +57,8 @@ setup(
         'scripts/lldpshow',
         'scripts/port2alias',
         'scripts/portstat',
-<<<<<<< HEAD
         'scripts/teamshow',
         'scripts/config-hwsku.sh',
-=======
-        'scripts/teamshow'
->>>>>>> msft-github
     ],
     data_files=[
         ('/etc/bash_completion.d', glob.glob('data/etc/bash_completion.d/*')),
@@ -77,11 +73,6 @@ setup(
             'psuutil = psuutil.main:cli',
             'show = show.main:cli',
             'sonic-clear = clear.main:cli',
-<<<<<<< HEAD
-            'debug = debug.main:cli',
-            'undebug = undebug.main:cli',
-=======
->>>>>>> msft-github
             'sonic_installer = sonic_installer.main:cli',
             'undebug = undebug.main:cli',
         ]
