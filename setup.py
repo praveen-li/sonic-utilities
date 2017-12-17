@@ -1,11 +1,17 @@
 import glob
+import sys
 from setuptools import setup
 import unittest
 
+# For python3 wheel, we currently don't need test
+# TODO: build python3 wheel of all the dependencies, and remove conditional test
 def get_test_suite():
-    test_loader = unittest.TestLoader()
-    test_suite = test_loader.discover('sonic-utilities-tests', pattern='*.py')
-    return test_suite
+    if sys.version_info >= (3, 0):
+        return unittest.TestSuite()
+    else:
+        test_loader = unittest.TestLoader()
+        test_suite = test_loader.discover('sonic-utilities-tests', pattern='*.py')
+        return test_suite
 
 setup(
     name='sonic-utilities',
@@ -17,7 +23,22 @@ setup(
     url='https://github.com/Azure/sonic-utilities',
     maintainer='Joe LeVeque',
     maintainer_email='jolevequ@microsoft.com',
-    packages=['config', 'sfputil', 'show', 'clear', 'debug', 'undebug','sonic_eeprom', 'sonic_installer', 'sonic_psu', 'sonic_sfp', 'acl_loader', 'sonic-utilities-tests'],
+    packages=[
+        'acl_loader',
+        'clear',
+        'config',
+        'debug',
+        'pfcwd',
+        'sfputil',
+        'psuutil',
+        'show',
+        'sonic_eeprom',
+        'sonic_installer',
+        'sonic_psu',
+        'sonic_sfp',
+        'sonic-utilities-tests',
+        'undebug',
+    ],
     package_data={
         'show': ['aliases.ini']
     },
@@ -27,6 +48,7 @@ setup(
         'scripts/coredump-compress',
         'scripts/decode-syseeprom',
         'scripts/dropcheck',
+        'scripts/ecnconfig',
         'scripts/fast-reboot',
         'scripts/fast-reboot-dump.py',
         'scripts/fdbshow',
@@ -35,22 +57,33 @@ setup(
         'scripts/lldpshow',
         'scripts/port2alias',
         'scripts/portstat',
+<<<<<<< HEAD
         'scripts/teamshow',
         'scripts/config-hwsku.sh',
+=======
+        'scripts/teamshow'
+>>>>>>> msft-github
     ],
     data_files=[
         ('/etc/bash_completion.d', glob.glob('data/etc/bash_completion.d/*')),
     ],
     entry_points={
         'console_scripts': [
+            'acl-loader = acl_loader.main:cli',
             'config = config.main:cli',
+            'debug = debug.main:cli',
+            'pfcwd = pfcwd.main:cli',
             'sfputil = sfputil.main:cli',
+            'psuutil = psuutil.main:cli',
             'show = show.main:cli',
             'sonic-clear = clear.main:cli',
+<<<<<<< HEAD
             'debug = debug.main:cli',
             'undebug = undebug.main:cli',
+=======
+>>>>>>> msft-github
             'sonic_installer = sonic_installer.main:cli',
-            'acl-loader = acl_loader.main:cli'
+            'undebug = undebug.main:cli',
         ]
     },
     install_requires=[
@@ -69,6 +102,7 @@ setup(
         'Natural Language :: English',
         'Operating System :: POSIX :: Linux',
         'Programming Language :: Python :: 2.7',
+        'Programming Language :: Python :: 3.6',
         'Topic :: Utilities',
     ],
     keywords='sonic SONiC utilities command line cli CLI',
