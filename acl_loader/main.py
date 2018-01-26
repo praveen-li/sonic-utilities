@@ -1,17 +1,14 @@
-
 #!/usr/bin/env python
 
 import click
-import sys
-import os.path
 import json
-import argparse
 import tabulate
 from natsort import natsorted
 
 import openconfig_acl
 import pyangbind.lib.pybindJSON as pybindJSON
 from swsssdk import ConfigDBConnector
+from swsssdk import SonicV2Connector
 
 
 def info(msg):
@@ -44,6 +41,8 @@ class AclLoader(object):
 
     ACL_TABLE = "ACL_TABLE"
     ACL_RULE = "ACL_RULE"
+    ACL_TABLE_TYPE_MIRROR = "MIRROR"
+    ACL_TABLE_TYPE_CTRLPLANE = "CTRLPLANE"
     MIRROR_SESSION = "MIRROR_SESSION"
     SESSION_PREFIX = "everflow"
 
@@ -81,6 +80,8 @@ class AclLoader(object):
         self.sessions_db_info = {}
         self.configdb = ConfigDBConnector()
         self.configdb.connect()
+        self.appdb = SonicV2Connector()
+        self.appdb.connect(self.appdb.APPL_DB)
 
         self.read_tables_info()
         self.read_rules_info()
@@ -112,6 +113,11 @@ class AclLoader(object):
         :return:
         """
         self.sessions_db_info = self.configdb.get_table(self.MIRROR_SESSION)
+        for key in self.sessions_db_info.keys():
+            app_db_info = self.appdb.get_all(self.appdb.APPL_DB, "{}:{}".format(self.MIRROR_SESSION, key))
+
+            status = app_db_info.get("status", "inactive")
+            self.sessions_db_info[key]["status"] = status
 
     def get_sessions_db_info(self):
         """
@@ -157,11 +163,19 @@ class AclLoader(object):
 
     def is_table_mirror(self, tname):
         """
-        Check if ACL table type is MIRROR
+        Check if ACL table type is ACL_TABLE_TYPE_MIRROR
         :param tname: ACL table name
-        :return: True if table type is MIRROR else False
+        :return: True if table type is ACL_TABLE_TYPE_MIRROR else False
         """
-        return self.tables_db_info[tname]['type'].upper() == "MIRROR"
+        return self.tables_db_info[tname]['type'].upper() == self.ACL_TABLE_TYPE_MIRROR
+
+    def is_table_control_plane(self, tname):
+        """
+        Check if ACL table type is ACL_TABLE_TYPE_CTRLPLANE
+        :param tname: ACL table name
+        :return: True if table type is ACL_TABLE_TYPE_CTRLPLANE else False
+        """
+        return self.tables_db_info[tname]['type'].upper() == self.ACL_TABLE_TYPE_CTRLPLANE
 
     def load_rules_from_file(self, filename):
         """
@@ -177,7 +191,9 @@ class AclLoader(object):
         rule_props = {}
 
         if rule.actions.config.forwarding_action == "ACCEPT":
-            if self.is_table_mirror(table_name):
+            if self.is_table_control_plane(table_name):
+                rule_props["PACKET_ACTION"] = "ACCEPT"
+            elif self.is_table_mirror(table_name):
                 session_name = self.get_session_name()
                 if not session_name:
                     raise AclLoaderException("Mirroring session does not exist")
@@ -239,6 +255,15 @@ class AclLoader(object):
         return rule_props
 
     def convert_port(self, port):
+        """
+        Convert port field format from openconfig ACL to Config DB schema
+        :param port: String, ACL port number or range in openconfig format
+        :return: Tuple, first value is converted port string,
+            second value is boolean, True if value is a port range, False
+            if it is a single port value
+        """
+        # OpenConfig port range is of the format "####..####", whereas
+        # Config DB format is "####-####"
         if ".." in port:
             return  port.replace("..", "-"), True
         else:
@@ -258,21 +283,21 @@ class AclLoader(object):
 
         for flag in rule.transport.config.tcp_flags:
             if flag == "TCP_FIN":
-                tcp_flags = tcp_flags | 0x01
+                tcp_flags |= 0x01
             if flag == "TCP_SYN":
-                tcp_flags = tcp_flags | 0x02
+                tcp_flags |= 0x02
             if flag == "TCP_RST":
-                tcp_flags = tcp_flags | 0x04
+                tcp_flags |= 0x04
             if flag == "TCP_PSH":
-                tcp_flags = tcp_flags | 0x08
+                tcp_flags |= 0x08
             if flag == "TCP_ACK":
-                tcp_flags = tcp_flags | 0x10
+                tcp_flags |= 0x10
             if flag == "TCP_URG":
-                tcp_flags = tcp_flags | 0x20
+                tcp_flags |= 0x20
             if flag == "TCP_ECE":
-                tcp_flags = tcp_flags | 0x40
+                tcp_flags |= 0x40
             if flag == "TCP_CWR":
-                tcp_flags = tcp_flags | 0x80
+                tcp_flags |= 0x80
 
         if tcp_flags:
             rule_props["TCP_FLAGS"] = '0x{:02x}/0x{:02x}'.format(tcp_flags, tcp_flags)
@@ -308,7 +333,7 @@ class AclLoader(object):
         rule_props = {}
         rule_data = {(table_name, "DEFAULT_RULE"): rule_props}
         rule_props["PRIORITY"] = self.min_priority
-        rule_props["ETHER_TYPE"] = "0x0800"
+        rule_props["ETHER_TYPE"] = self.ethertype_map["ETHERTYPE_IPV4"]
         rule_props["PACKET_ACTION"] = "DROP"
         return rule_data
 
@@ -369,6 +394,19 @@ class AclLoader(object):
                 self.configdb.mod_entry(self.ACL_RULE, key, None)
                 self.configdb.mod_entry(self.ACL_RULE, key, self.rules_info[key])
 
+
+    def delete(self, table=None, rule=None):
+        """
+        :param table:
+        :param rule:
+        :return:
+        """
+        for key in self.rules_db_info.iterkeys():
+            if not table or table == key[0]:
+                if not rule or rule == key[1]:
+                    self.configdb.set_entry(self.ACL_RULE, key, None)
+
+
     def show_table(self, table_name):
         """
         Show ACL table configuration.
@@ -400,14 +438,14 @@ class AclLoader(object):
         :param session_name: Optional. Mirror session name. Filter sessions by specified name.
         :return:
         """
-        header = ("Name", "SRC IP", "DST IP", "GRE", "DSCP", "TTL", "Queue")
+        header = ("Name", "Status", "SRC IP", "DST IP", "GRE", "DSCP", "TTL", "Queue")
 
         data = []
         for key, val in self.get_sessions_db_info().iteritems():
             if session_name and key != session_name:
                 continue
 
-            data.append([key, val["src_ip"], val["dst_ip"],
+            data.append([key, val["status"], val["src_ip"], val["dst_ip"],
                          val.get("gre_type", ""), val.get("dscp", ""),
                          val.get("ttl", ""), val.get("queue", "")])
 
@@ -420,7 +458,7 @@ class AclLoader(object):
         :param rule_id: Optional. ACL rule name. Filter rule by specified rule name.
         :return:
         """
-        header = ("Rule ID", "Table Name", "Priority", "Action", "Match")
+        header = ("Rule ID", "Rule Name", "Priority", "Action", "Match")
 
         ignore_list = ["PRIORITY", "PACKET_ACTION", "MIRROR_ACTION"]
 
@@ -575,6 +613,19 @@ def incremental(ctx, filename, session_name, max_priority):
 
     acl_loader.load_rules_from_file(filename)
     acl_loader.incremental_update()
+
+
+@cli.command()
+@click.argument('table', required=False)
+@click.argument('rule', required=False)
+@click.pass_context
+def delete(ctx, table, rule):
+    """
+    Delete ACL rules.
+    """
+    acl_loader = ctx.obj["acl_loader"]
+
+    acl_loader.delete(table, rule)
 
 
 if __name__ == "__main__":

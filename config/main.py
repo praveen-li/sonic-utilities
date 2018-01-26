@@ -189,6 +189,8 @@ def load_minigraph():
         command = "{} -m --write-to-db".format(SONIC_CFGGEN_PATH)
     run_command(command, display_cmd=True)
     client.set(config_db.INIT_INDICATOR, True)
+    if os.path.isfile('/etc/sonic/acl.json'):
+        run_command("acl-loader update full /etc/sonic/acl.json", display_cmd=True)
     #FIXME: After config DB daemon is implemented, we'll no longer need to restart every service.
     _restart_services()
     print "Please note setting loaded from minigraph will be lost after system reboot. To preserve setting, run `config save`."
@@ -371,6 +373,19 @@ def startup(interface_name, verbose):
     command = "ip link set {} up".format(interface_name)
     run_command(command, display_cmd=verbose)
 
+#
+# 'speed' subcommand
+#
+
+@interface.command()
+@click.argument('interface_name', metavar='<interface_name>', required=True)
+@click.argument('interface_speed', metavar='<interface_speed>', required=True)
+@click.option('-v', '--verbose', is_flag=True, help="Enable verbose output")
+def speed(interface_name, interface_speed, verbose):
+    """Set interface speed"""
+    command = "portconfig -p {} -s {}".format(interface_name, interface_speed)
+    if verbose: command += " -vv"
+    run_command(command, display_cmd=verbose)
 
 #
 # 'acl' group
