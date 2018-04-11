@@ -49,38 +49,48 @@ def _get_all_neighbor_ipaddresses():
     config_db.connect()
     return config_db.get_table('BGP_NEIGHBOR').keys()
 
-def _get_neighbor_ipaddress_by_hostname(hostname):
-    """Returns string containing IP address of neighbor with hostname <hostname> or None if <hostname> not a neighbor
+def _get_neighbor_ipaddress_list_by_hostname(hostname):
+    """Returns list of strings, each containing an IP address of neighbor with
+       hostname <hostname>. Returns empty list if <hostname> not a neighbor
     """
+    addrs = []
     config_db = ConfigDBConnector()
     config_db.connect()
     bgp_sessions = config_db.get_table('BGP_NEIGHBOR')
     for addr, session in bgp_sessions.iteritems():
         if session.has_key('name') and session['name'] == hostname:
-            return addr
-    return None
+            addrs.append(addr)
+    return addrs
 
-def _switch_bgp_session_status_by_addr(ipaddress, status, verbose):
+def _change_bgp_session_status_by_addr(ipaddress, status, verbose):
     """Start up or shut down BGP session by IP address 
     """
     verb = 'Starting' if status == 'up' else 'Shutting'
     click.echo("{} {} BGP session with neighbor {}...".format(verb, status, ipaddress))
     config_db = ConfigDBConnector()
     config_db.connect()
+
     config_db.mod_entry('bgp_neighbor', ipaddress, {'admin_status': status})
 
-def _switch_bgp_session_status(ipaddr_or_hostname, status, verbose):
+def _change_bgp_session_status(ipaddr_or_hostname, status, verbose):
     """Start up or shut down BGP session by IP address or hostname
     """
-    if _is_neighbor_ipaddress(ipaddr_or_hostname):
-        ipaddress = ipaddr_or_hostname
+    ip_addrs = []
+
+    # If we were passed an IP address, convert it to lowercase because IPv6 addresses were
+    # stored in ConfigDB with all lowercase alphabet characters during minigraph parsing
+    if _is_neighbor_ipaddress(ipaddr_or_hostname.lower()):
+        ip_addrs.append(ipaddr_or_hostname.lower())
     else:
         # If <ipaddr_or_hostname> is not the IP address of a neighbor, check to see if it's a hostname
-        ipaddress = _get_neighbor_ipaddress_by_hostname(ipaddr_or_hostname)
-    if ipaddress == None:
+        ip_addrs = _get_neighbor_ipaddress_list_by_hostname(ipaddr_or_hostname)
+
+    if not ip_addrs:
         print "Error: could not locate neighbor '{}'".format(ipaddr_or_hostname)
         raise click.Abort
-    _switch_bgp_session_status_by_addr(ipaddress, status, verbose)
+
+    for ip_addr in ip_addrs:
+        _change_bgp_session_status_by_addr(ip_addr, status, verbose)
 
 def _change_hostname(hostname):
     current_hostname = os.uname()[1]
@@ -89,6 +99,41 @@ def _change_hostname(hostname):
         run_command('hostname -F /etc/hostname', display_cmd=True)
         run_command('sed -i "/\s{}$/d" /etc/hosts'.format(current_hostname), display_cmd=True)
         run_command('echo "127.0.0.1 {}" >> /etc/hosts'.format(hostname), display_cmd=True)
+
+def _clear_qos():
+    QOS_TABLE_NAMES = [
+            'TC_TO_PRIORITY_GROUP_MAP',
+            'MAP_PFC_PRIORITY_TO_QUEUE',
+            'TC_TO_QUEUE_MAP',
+            'DSCP_TO_TC_MAP',
+            'SCHEDULER',
+            'PFC_PRIORITY_TO_PRIORITY_GROUP_MAP',
+            'PORT_QOS_MAP',
+            'WRED_PROFILE',
+            'QUEUE',
+            'CABLE_LENGTH',
+            'BUFFER_POOL',
+            'BUFFER_PROFILE',
+            'BUFFER_PG',
+            'BUFFER_QUEUE']
+    config_db = ConfigDBConnector()
+    config_db.connect()
+    for qos_table in QOS_TABLE_NAMES:
+        config_db.delete_table(qos_table)
+
+def _get_hwsku():
+    config_db = ConfigDBConnector()
+    config_db.connect()
+    metadata = config_db.get_table('DEVICE_METADATA')
+    return metadata['localhost']['hwsku']
+
+def _get_platform():
+    with open('/host/machine.conf') as machine_conf:
+        for line in machine_conf:
+            tokens = line.split('=')
+            if tokens[0].strip() == 'onie_platform' or tokens[0].strip() == 'aboot_platform':
+                return tokens[1].strip()
+    return ''
 
 # Callback for confirmation prompt. Aborts if user enters "n"
 def _abort_if_false(ctx, param, value):
@@ -149,7 +194,7 @@ def reload(filename, yes):
     client.flushdb()
     command = "{} -j {} --write-to-db".format(SONIC_CFGGEN_PATH, filename)
     run_command(command, display_cmd=True)
-    client.set(config_db.INIT_INDICATOR, True)
+    client.set(config_db.INIT_INDICATOR, 1)
     _restart_services()
 
 @cli.command()
@@ -186,16 +231,50 @@ def load_minigraph():
     client = config_db.redis_clients[config_db.CONFIG_DB]
     client.flushdb()
     if os.path.isfile('/etc/sonic/init_cfg.json'):
-        command = "{} -m -j /etc/sonic/init_cfg.json --write-to-db".format(SONIC_CFGGEN_PATH)
+        command = "{} -H -m -j /etc/sonic/init_cfg.json --write-to-db".format(SONIC_CFGGEN_PATH)
     else:
-        command = "{} -m --write-to-db".format(SONIC_CFGGEN_PATH)
+        command = "{} -H -m --write-to-db".format(SONIC_CFGGEN_PATH)
     run_command(command, display_cmd=True)
-    client.set(config_db.INIT_INDICATOR, True)
+    client.set(config_db.INIT_INDICATOR, 1)
+    run_command('pfcwd start_default', display_cmd=True)
     if os.path.isfile('/etc/sonic/acl.json'):
         run_command("acl-loader update full /etc/sonic/acl.json", display_cmd=True)
+    run_command("config qos reload", display_cmd=True)
     #FIXME: After config DB daemon is implemented, we'll no longer need to restart every service.
     _restart_services()
     print "Please note setting loaded from minigraph will be lost after system reboot. To preserve setting, run `config save`."
+
+#
+# 'qos' group
+#
+@cli.group()
+@click.pass_context
+def qos(ctx):
+    pass
+
+@qos.command('clear')
+def clear():
+    _clear_qos()
+
+@qos.command('reload')
+def reload():
+    _clear_qos()
+    platform = _get_platform()
+    hwsku = _get_hwsku()
+    buffer_template_file = os.path.join('/usr/share/sonic/device/', platform, hwsku, 'buffers.json.j2')
+    if os.path.isfile(buffer_template_file):
+        command = "{} -m -t {} >/tmp/buffers.json".format(SONIC_CFGGEN_PATH, buffer_template_file)
+        run_command(command, display_cmd=True)
+        command = "{} -j /tmp/buffers.json --write-to-db".format(SONIC_CFGGEN_PATH)
+        run_command(command, display_cmd=True)
+        qos_file = os.path.join('/usr/share/sonic/device/', platform, hwsku, 'qos.json')
+        if os.path.isfile(qos_file):
+            command = "{} -j {} --write-to-db".format(SONIC_CFGGEN_PATH, qos_file)
+            run_command(command, display_cmd=True)
+        else:
+            click.secho('QoS definition not found at {}'.format(qos_file), fg='yellow')
+    else:
+        click.secho('Buffer definition template not found at {}'.format(buffer_template_file), fg='yellow')
 
 #
 # 'vlan' group
@@ -310,7 +389,7 @@ def all(verbose):
     """Shut down all BGP sessions"""
     bgp_neighbor_ip_list = _get_all_neighbor_ipaddresses()
     for ipaddress in bgp_neighbor_ip_list:
-        _switch_bgp_session_status_by_addr(ipaddress, 'down', verbose)
+        _change_bgp_session_status_by_addr(ipaddress, 'down', verbose)
 
 # 'neighbor' subcommand
 @shutdown.command()
@@ -318,7 +397,7 @@ def all(verbose):
 @click.option('-v', '--verbose', is_flag=True, help="Enable verbose output")
 def neighbor(ipaddr_or_hostname, verbose):
     """Shut down BGP session by neighbor IP address or hostname"""
-    _switch_bgp_session_status(ipaddr_or_hostname, 'down', verbose)
+    _change_bgp_session_status(ipaddr_or_hostname, 'down', verbose)
 
 @bgp.group()
 def startup():
@@ -332,7 +411,7 @@ def all(verbose):
     """Start up all BGP sessions"""
     bgp_neighbor_ip_list = _get_all_neighbor_ipaddresses()
     for ipaddress in bgp_neighbor_ip_list:
-        _switch_bgp_session_status(ipaddress, 'up', verbose)
+        _change_bgp_session_status(ipaddress, 'up', verbose)
 
 # 'neighbor' subcommand
 @startup.command()
@@ -340,7 +419,7 @@ def all(verbose):
 @click.option('-v', '--verbose', is_flag=True, help="Enable verbose output")
 def neighbor(ipaddr_or_hostname, verbose):
     """Start up BGP session by neighbor IP address or hostname"""
-    _switch_bgp_session_status(ipaddr_or_hostname, 'up', verbose)
+    _change_bgp_session_status(ipaddr_or_hostname, 'up', verbose)
 
 #
 # 'interface' group

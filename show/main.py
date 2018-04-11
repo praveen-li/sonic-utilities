@@ -598,8 +598,8 @@ def summary():
     username = getpass.getuser()
 
     PLATFORM_TEMPLATE_FILE = "/tmp/cli_platform_{0}.j2".format(username)
-    PLATFORM_TEMPLATE_CONTENTS = "Platform: {{ platform }}\n" \
-                                 "HwSKU: {{ DEVICE_METADATA['localhost']['hwsku'] }}\n" \
+    PLATFORM_TEMPLATE_CONTENTS = "Platform: {{ DEVICE_METADATA.localhost.platform }}\n" \
+                                 "HwSKU: {{ DEVICE_METADATA.localhost.hwsku }}\n" \
                                  "ASIC: {{ asic_type }}"
 
     # Create a temporary Jinja2 template file to use with sonic-cfggen
@@ -764,6 +764,13 @@ def runningconfiguration():
     pass
 
 
+# 'all' subcommand ("show runningconfiguration all")
+@runningconfiguration.command()
+def all():
+    """Show full running configuration"""
+    run_command('sonic-cfggen -d --print-data')
+
+
 # 'bgp' subcommand ("show runningconfiguration bgp")
 @runningconfiguration.command()
 def bgp():
@@ -888,20 +895,29 @@ def config(redis_unix_socket_path):
     data = config_db.get_table('VLAN')
     keys = data.keys()
 
-    def mode(key, data):
-        info = []
-        for m in data.get('members', []):
-            entry = config_db.get_entry('VLAN_MEMBER', (key, m))
-            mode = entry.get('tagging_mode')
-            if mode == None:
-                info.append('?')
-            else:
-                info.append(mode)
-        return '\n'.join(info)
+    def tablelize(keys, data):
+        table = []
+
+        for k in keys:
+            for m in data[k].get('members', []):
+                r = []
+                r.append(k)
+                r.append(data[k]['vlanid'])
+                r.append(m)
+
+                entry = config_db.get_entry('VLAN_MEMBER', (k, m))
+                mode = entry.get('tagging_mode')
+                if mode == None:
+                    r.append('?')
+                else:
+                    r.append(mode)
+
+                table.append(r)
+
+        return table
 
     header = ['Name', 'VID', 'Member', 'Mode']
-    click.echo(tabulate([ [k, data[k]['vlanid'], '\n'.join(data[k].get('members', [])), mode(k, data[k])] for k in keys ], header))
-
+    click.echo(tabulate(tablelize(keys, data), header))
 
 @cli.command('services')
 def services():
@@ -934,7 +950,8 @@ def aaa():
             'fallback': 'True (default)'
         }
     }
-    aaa['authentication'].update(data['authentication'])
+    if 'authentication' in data:
+        aaa['authentication'].update(data['authentication'])
     for row in aaa:
         entry = aaa[row]
         for key in entry:
@@ -957,7 +974,8 @@ def tacacs():
             'passkey': '<EMPTY_STRING> (default)'
         }
     }
-    tacplus['global'].update(data['global'])
+    if 'global' in data:
+        tacplus['global'].update(data['global'])
     for key in tacplus['global']:
         output += ('TACPLUS global %s %s\n' % (str(key), str(tacplus['global'][key])))
 
@@ -972,10 +990,17 @@ def tacacs():
 
 
 #
-# 'session' command ###
+# 'mirror' group ###
 #
 
-@cli.command()
+@cli.group(cls=AliasedGroup, default_if_no_args=False)
+def mirror():
+    """Show mirroring (Everflow) information"""
+    pass
+
+
+# 'session' subcommand  ("show mirror session")
+@mirror.command()
 @click.argument('session_name', required=False)
 def session(session_name):
     """Show existing everflow sessions"""
@@ -995,24 +1020,7 @@ def acl():
     pass
 
 
-#
-# 'acl table' command ###
-#
-
-@acl.command()
-@click.argument('table_name', required=False)
-def table(table_name):
-    """Show existing ACL tables"""
-    if table_name is None:
-        table_name = ""
-
-    run_command("acl-loader show table {}".format(table_name))
-
-
-#
-# 'acl rule' command ###
-#
-
+# 'rule' subcommand  ("show acl rule")
 @acl.command()
 @click.argument('table_name', required=False)
 @click.argument('rule_id', required=False)
@@ -1026,8 +1034,20 @@ def rule(table_name, rule_id):
 
     run_command("acl-loader show rule {} {}".format(table_name, rule_id))
 
+
+# 'table' subcommand  ("show acl table")
+@acl.command()
+@click.argument('table_name', required=False)
+def table(table_name):
+    """Show existing ACL tables"""
+    if table_name is None:
+        table_name = ""
+
+    run_command("acl-loader show table {}".format(table_name))
+
+
 #
-# 'session' command (show ecn)
+# 'ecn' command ("show ecn")
 #
 @cli.command('ecn')
 def ecn():

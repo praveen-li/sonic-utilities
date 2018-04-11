@@ -2,6 +2,7 @@
 
 import click
 import json
+import syslog
 import tabulate
 from natsort import natsorted
 
@@ -13,14 +14,17 @@ from swsssdk import SonicV2Connector
 
 def info(msg):
     click.echo(click.style("Info: ", fg='cyan') + click.style(str(msg), fg='green'))
+    syslog.syslog(syslog.LOG_INFO, msg)
 
 
 def warning(msg):
     click.echo(click.style("Warning: ", fg='cyan') + click.style(str(msg), fg='yellow'))
+    syslog.syslog(syslog.LOG_WARNING, msg)
 
 
 def error(msg):
     click.echo(click.style("Error: ", fg='cyan') + click.style(str(msg), fg='red'))
+    syslog.syslog(syslog.LOG_ERR, msg)
 
 
 def deep_update(dst, src):
@@ -80,7 +84,7 @@ class AclLoader(object):
         self.sessions_db_info = {}
         self.configdb = ConfigDBConnector()
         self.configdb.connect()
-        self.appdb = SonicV2Connector()
+        self.appdb = SonicV2Connector(host="127.0.0.1")
         self.appdb.connect(self.appdb.APPL_DB)
 
         self.read_tables_info()
@@ -115,8 +119,10 @@ class AclLoader(object):
         self.sessions_db_info = self.configdb.get_table(self.MIRROR_SESSION)
         for key in self.sessions_db_info.keys():
             app_db_info = self.appdb.get_all(self.appdb.APPL_DB, "{}:{}".format(self.MIRROR_SESSION, key))
-
-            status = app_db_info.get("status", "inactive")
+            if app_db_info:
+                status = app_db_info.get("status", "inactive")
+            else:
+                status = "error"
             self.sessions_db_info[key]["status"] = status
 
     def get_sessions_db_info(self):
@@ -352,8 +358,11 @@ class AclLoader(object):
 
             for acl_entry_name in acl_set.acl_entries.acl_entry:
                 acl_entry = acl_set.acl_entries.acl_entry[acl_entry_name]
-                rule = self.convert_rule_to_db_schema(table_name, acl_entry)
-                deep_update(self.rules_info, rule)
+                try:
+                    rule = self.convert_rule_to_db_schema(table_name, acl_entry)
+                    deep_update(self.rules_info, rule)
+                except AclLoaderException as ex:
+                    error("Error processing rule %s: %s. Skipped." % (acl_entry_name, ex))
 
             if not self.is_table_mirror(table_name):
                 deep_update(self.rules_info, self.deny_rule(table_name))
@@ -413,24 +422,33 @@ class AclLoader(object):
         :param table_name: Optional. ACL table name. Filter tables by specified name.
         :return:
         """
-        header = ("Name", "Type", "Ports", "Description")
+        header = ("Name", "Type", "Binding", "Description")
 
         data = []
         for key, val in self.get_tables_db_info().iteritems():
             if table_name and key != table_name:
                 continue
 
-            if not val["ports"]:
-                data.append([key, val["type"], "", val["policy_desc"]])
-            else:
-                ports = natsorted(val["ports"])
-                data.append([key, val["type"], ports[0], val["policy_desc"]])
+            if val["type"] == AclLoader.ACL_TABLE_TYPE_CTRLPLANE:
+                services = natsorted(val["services"])
+                data.append([key, val["type"], services[0], val["policy_desc"]])
 
-                if len(ports) > 1:
-                    for port in ports[1:]:
-                        data.append(["", "", port, ""])
+                if len(services) > 1:
+                    for service in services[1:]:
+                        data.append(["", "", service, ""])
+            else:
+                if not val["ports"]:
+                    data.append([key, val["type"], "", val["policy_desc"]])
+                else:
+                    ports = natsorted(val["ports"])
+                    data.append([key, val["type"], ports[0], val["policy_desc"]])
+
+                    if len(ports) > 1:
+                        for port in ports[1:]:
+                            data.append(["", "", port, ""])
 
         print(tabulate.tabulate(data, headers=header, tablefmt="simple", missingval=""))
+
 
     def show_session(self, session_name):
         """

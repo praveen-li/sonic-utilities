@@ -2,16 +2,13 @@
 
 function stop_sonic_services()
 {
-    echo "Stopping sonic services..."
-    systemctl stop swss
-    systemctl stop teamd
-    systemctl stop bgp
-    systemctl stop lldp
-    systemctl stop snmp
+    echo "Stopping syncd..."
+    docker exec -i syncd /usr/bin/syncd_request_shutdown --cold > /dev/null
+    sleep 3
 }
 
 # Obtain our platform as we will mount directories with these names in each docker
-PLATFORM=`sonic-cfggen -v platform`
+PLATFORM=`sonic-cfggen -H -v DEVICE_METADATA.localhost.platform`
 
 DEVPATH="/usr/share/sonic/device"
 REBOOT="platform_reboot"
