@@ -256,7 +256,7 @@ class AclStat(object):
         for table_name, rule_name in self.acl_rules.keys():
             rule_props = []
             rule = self.acl_rules[table_name, rule_name]
-            header = "ACL Rule: " + rule_name
+            header = "ACL Table: " + table_name + ", ACL Rule: " + rule_name
             print(header)
             print("="*len(header))
             for rk in rule.keys():
