@@ -164,6 +164,20 @@ def arp(ipaddress):
     else:
         run_command(cmd)
 
+#
+# 'ndp' command ("show ndp")
+#
+
+@cli.command()
+@click.argument('ip6address', required=False)
+def ndp(ip6address):
+    """Show IPv6 Neighbour table"""
+    cmd = "/bin/ip -6 neigh show"
+    if ip6address is not None:
+        command = '{} {}'.format(cmd, ip6address)
+        run_command(command)
+    else:
+        run_command(cmd)
 
 #
 # 'interfaces' group ("show interfaces ...")
