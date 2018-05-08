@@ -21,8 +21,8 @@ display_help() {
 }
 
 HWSKU_ROOT='/usr/share/sonic/device/'
-platform=`sonic-cfggen -j /etc/sonic/config_db.json -v platform`
-current_hwsku=`sonic-cfggen -j /etc/sonic/config_db.json -v DEVICE_METADATA.localhost.hwsku`
+platform=`sonic-cfggen -H -v DEVICE_METADATA.localhost.platform`
+current_hwsku=`sonic-cfggen -d -v DEVICE_METADATA.localhost.hwsku`
 RUNNING_PATH='/etc/sonic/'
 
 config_hwsku_exec() {
