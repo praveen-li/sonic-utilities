@@ -5,6 +5,7 @@ import click
 import os
 import subprocess
 from click_default_group import DefaultGroup
+from sonic_platform import get_system_routing_stack
 
 try:
     import ConfigParser as configparser
@@ -99,34 +100,57 @@ CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help', '-?'])
 
 @click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
 def cli():
-    """SONiC command line - 'debug' command"""
+    """SONiC debugging commands for routing events"""
     pass
 
+@cli.command()
+def enable():
+    """Enable debugging for routing events """
+    command = 'sudo vtysh -c "configure terminal" -c "log syslog debugging"'
+    run_command(command)
+
+@cli.command()
+def disable():
+    """Disable debugging for routing events """
+    command = 'sudo vtysh -c "configure terminal" -c "no log syslog debugging"'
+    run_command(command)
+
+
 #
-# 'bgp' group ###
+# Inserting 'debug' functionality into cli's parse-chain. Debugging commands are
+# determined by the routing-stack being elected.
 #
+routing_stack = get_system_routing_stack()
 
-@cli.group(cls=AliasedGroup, default_if_no_args=True)
-def bgp():
-    """debug bgp on """
-    pass
+if routing_stack == "quagga":
 
-@bgp.command(default=True)
-def default():
-    command = 'sudo vtysh -c "debug bgp"'
-    run_command(command)
+    from .debug_quagga import bgp
+    cli.add_command(bgp)
+    from .debug_quagga import zebra
+    cli.add_command(zebra)
 
-@bgp.command()
-def events():
-    """debug bgp events on """
-    command = 'sudo vtysh -c "debug bgp events"'
-    run_command(command)
+elif routing_stack == "frr":
 
-@bgp.command()
-def updates():
-    """debug bgp events on """
-    command = 'sudo vtysh -c "debug bgp updates"'
-    run_command(command)
+    @cli.command()
+    @click.argument('debug_args', nargs = -1, required = False)
+    def bgp(debug_args):
+        """Debug BGP information"""
+        debug_cmd = "debug bgp"
+        for arg in debug_args:
+            debug_cmd += " " + str(arg)
+        command = 'sudo vtysh -c "{}"'.format(debug_cmd)
+        run_command(command)
+
+    @cli.command()
+    @click.argument('debug_args', nargs = -1, required = False)
+    def zebra(debug_args):
+        """Debug Zebra information"""
+        debug_cmd = "debug zebra"
+        for arg in debug_args:
+            debug_cmd += " " + str(arg)
+        command = 'sudo vtysh -c "{}"'.format(debug_cmd)
+        run_command(command)
+
 
 if __name__ == '__main__':
     cli()
