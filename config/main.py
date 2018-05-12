@@ -140,6 +140,15 @@ def _abort_if_false(ctx, param, value):
     if not value:
         ctx.abort()
 
+def _stop_services():
+    run_command("service dhcp_relay stop", display_cmd=True)
+    run_command("service swss stop", display_cmd=True)
+    run_command("service snmp stop", display_cmd=True)
+    run_command("service lldp stop", display_cmd=True)
+    run_command("service pmon stop", display_cmd=True)
+    run_command("service bgp stop", display_cmd=True)
+    run_command("service teamd stop", display_cmd=True)
+
 def _restart_services():
     run_command("service hostname-config restart", display_cmd=True)
     run_command("service interfaces-config restart", display_cmd=True)
@@ -188,6 +197,8 @@ def reload(filename, yes):
     """Clear current configuration and import a previous saved config DB dump file."""
     if not yes:
         click.confirm('Clear current config and reload config from the file %s?' % filename, abort=True)
+    #Stop services before config push
+    _stop_services()
     config_db = ConfigDBConnector()
     config_db.connect()
     client = config_db.redis_clients[config_db.CONFIG_DB]
@@ -226,6 +237,9 @@ def load_mgmt_config(filename):
                 expose_value=False, prompt='Reload config from minigraph?')
 def load_minigraph():
     """Reconfigure based on minigraph."""
+    #Stop services before config push
+    _stop_services()
+
     config_db = ConfigDBConnector()
     config_db.connect()
     client = config_db.redis_clients[config_db.CONFIG_DB]
