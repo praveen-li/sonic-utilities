@@ -12,8 +12,6 @@ from minigraph import parse_device_desc_xml
 import aaa
 
 SONIC_CFGGEN_PATH = "sonic-cfggen"
-MINIGRAPH_PATH = "/etc/sonic/minigraph.xml"
-MINIGRAPH_BGP_SESSIONS = "minigraph_bgp"
 
 #
 # Helper functions
