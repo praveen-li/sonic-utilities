@@ -21,6 +21,7 @@ import time
 from collections import namedtuple, OrderedDict
 from natsort import natsorted
 from tabulate import tabulate
+from fcntl import flock, LOCK_EX, LOCK_NB
 
 
 PORT_RATE = 40
@@ -64,6 +65,8 @@ PORT_STATE_DOWN = 'D'
 PORT_STATE_DISABLED = 'X'
 PORT_SPEED_FIELD = 'speed'
 FIELD_COUNT = 10
+CACHED_STATS_FILE_HIDDEN = ".__CaChEd_StAtS__"
+ERR_PER_DEN = 13
 
 class Portstat(object):
     def __init__(self):
@@ -358,11 +361,11 @@ Examples:
     print_all = args.all
 
     if tag_name is not None:
-        cnstat_file = uid + "-" + tag_name
+        cnstat_file = CACHED_STATS_FILE_HIDDEN + tag_name
     else:
-        cnstat_file = uid
+        cnstat_file = CACHED_STATS_FILE_HIDDEN
 
-    cnstat_dir = "/tmp/portstat-" + uid
+    cnstat_dir = "/tmp/portstat"
     cnstat_fqn_file = cnstat_dir + "/" + cnstat_file
 
     if delete_all_stats:
@@ -406,8 +409,22 @@ Examples:
 
 
     if save_fresh_stats:
+        if uid is not '0':
+            print("Permission Denied, Please run as root/sudo")
+            sys.exit(ERR_PER_DEN);
         try:
-            pickle.dump(cnstat_dict, open(cnstat_fqn_file, 'w'))
+            cnstat_fqn_fd = open(cnstat_fqn_file, 'w')
+            try:
+                # do not block forever, allow user to try again
+                flock(cnstat_fqn_fd, LOCK_EX|LOCK_NB)
+            except IOError as e:
+                print("Counters are being cleared by others, Try again")
+                cnstat_fqn_fd.close()
+                sys.exit(e.errno)
+
+            pickle.dump(cnstat_dict, cnstat_fqn_fd)
+            cnstat_fqn_fd.close()
+
         except IOError as e:
             sys.exit(e.errno)
         else:
