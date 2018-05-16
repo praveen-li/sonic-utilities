@@ -62,6 +62,8 @@ PORT_STATUS_VALUE_DOWN = 'DOWN'
 PORT_STATE_UP = 'U'
 PORT_STATE_DOWN = 'D'
 PORT_STATE_DISABLED = 'X'
+PORT_SPEED_FIELD = 'speed'
+FIELD_COUNT = 10
 
 class Portstat(object):
     def __init__(self):
@@ -77,7 +79,7 @@ class Portstat(object):
             """
                 Get the counters from specific table.
             """
-            fields = ["0","0","0","0","0","0","0","0","0","0"]
+            fields = list("0" * FIELD_COUNT)
             for counter_name, pos in counter_bucket_dict.iteritems():
                 full_table_id = COUNTER_TABLE_PREFIX + table_id
                 counter_data =  self.db.get(self.db.COUNTERS_DB, full_table_id, counter_name)
@@ -116,6 +118,17 @@ class Portstat(object):
             return PORT_STATE_DOWN
         else:
             return STATUS_NA
+
+    def get_port_speed(self, port_name):
+        """
+            Get the port speed
+        """
+        full_table_id = PORT_STATUS_TABLE_PREFIX + port_name
+        port_speed = self.db.get(self.db.APPL_DB, full_table_id, PORT_SPEED_FIELD)
+        if port_speed is None:
+             return PORT_RATE
+	else:
+	     return int(port_speed)
 
     def table_as_json(self, table, print_all):
         """
@@ -209,7 +222,7 @@ class Portstat(object):
                 rate = int(ns_diff(newstr, oldstr).replace(',',''))/delta
                 return "{:.2f}".format(rate)+'/s'
 
-        def ns_util(newstr, oldstr, delta):
+        def ns_util(newstr, oldstr, delta, key):
             """
                 Calculate the util.
             """
@@ -217,10 +230,13 @@ class Portstat(object):
                 return STATUS_NA
             else:
                 rate = int(ns_diff(newstr, oldstr).replace(',',''))/delta
-                util = rate/(PORT_RATE*1024*1024*1024/8.0)*100
+                # get_port_speed() returns speed in MB, so use 1O^6 (not 2^20)
+                # in utilization calculation.
+                util = rate/(self.get_port_speed(key)*1000*1000/8.0)*100
                 return "{:.2f}%".format(util)
 
         table = []
+        default_cntr = NStats._make(list("0" * FIELD_COUNT))
 
         for key, cntr in cnstat_new_dict.iteritems():
             if key == 'time':
@@ -230,6 +246,8 @@ class Portstat(object):
             old_cntr = None
             if key in cnstat_old_dict:
                 old_cntr = cnstat_old_dict.get(key)
+            else:
+		old_cntr = default_cntr
 
             if print_all:
                 if old_cntr is not None:
@@ -237,14 +255,14 @@ class Portstat(object):
                                   ns_diff(cntr.rx_ok, old_cntr.rx_ok),
                                   ns_brate(cntr.rx_byt, old_cntr.rx_byt, time_gap),
                                   ns_prate(cntr.rx_ok, old_cntr.rx_ok, time_gap),
-                                  ns_util(cntr.rx_byt, old_cntr.rx_byt, time_gap),
+                                  ns_util(cntr.rx_byt, old_cntr.rx_byt, time_gap, key),
                                   ns_diff(cntr.rx_err, old_cntr.rx_err),
                                   ns_diff(cntr.rx_drop, old_cntr.rx_drop),
                                   ns_diff(cntr.rx_ovr, old_cntr.rx_ovr),
                                   ns_diff(cntr.tx_ok, old_cntr.tx_ok),
                                   ns_brate(cntr.tx_byt, old_cntr.tx_byt, time_gap),
                                   ns_prate(cntr.tx_ok, old_cntr.tx_ok, time_gap),
-                                  ns_util(cntr.tx_byt, old_cntr.tx_byt, time_gap),
+                                  ns_util(cntr.tx_byt, old_cntr.tx_byt, time_gap, key),
                                   ns_diff(cntr.tx_err, old_cntr.tx_err),
                                   ns_diff(cntr.tx_drop, old_cntr.tx_drop),
                                   ns_diff(cntr.tx_ovr, old_cntr.tx_ovr)))
@@ -269,13 +287,13 @@ class Portstat(object):
                     table.append((key, self.get_port_state(key),
                                       ns_diff(cntr.rx_ok, old_cntr.rx_ok),
                                       ns_brate(cntr.rx_byt, old_cntr.rx_byt, time_gap),
-                                      ns_util(cntr.rx_byt, old_cntr.rx_byt, time_gap),
+                                      ns_util(cntr.rx_byt, old_cntr.rx_byt, time_gap, key),
                                       ns_diff(cntr.rx_err, old_cntr.rx_err),
                                       ns_diff(cntr.rx_drop, old_cntr.rx_drop),
                                       ns_diff(cntr.rx_ovr, old_cntr.rx_ovr),
                                       ns_diff(cntr.tx_ok, old_cntr.tx_ok),
                                       ns_brate(cntr.tx_byt, old_cntr.tx_byt, time_gap),
-                                      ns_util(cntr.tx_byt, old_cntr.tx_byt, time_gap),
+                                      ns_util(cntr.tx_byt, old_cntr.tx_byt, time_gap, key),
                                       ns_diff(cntr.tx_err, old_cntr.tx_err),
                                       ns_diff(cntr.tx_drop, old_cntr.tx_drop),
                                       ns_diff(cntr.tx_ovr, old_cntr.tx_ovr)))
@@ -410,7 +428,11 @@ Examples:
                 print "\nFile '%s' does not exist" % cnstat_fqn_file
                 print "Did you run 'portstat -c -t %s' to record the counters via tag %s?\n" % (tag_name, tag_name)
             else:
-                portstat.cnstat_print(cnstat_dict, use_json, print_all)
+                # Cached Stats file does not exist, so use boot time for Bps calculation.
+                with open('/proc/uptime', 'r') as uptime_f:
+                    time_diff = datetime.timedelta(seconds = float(uptime_f.readline().split()[0]))
+                    cnstat_cached_dict['time'] = cnstat_dict.get('time') - time_diff
+                portstat.cnstat_diff_print(cnstat_dict, cnstat_cached_dict, use_json, print_all)
     else:
         #wait for the specified time and then gather the new stats and output the difference.
         time.sleep(wait_time_in_seconds)
