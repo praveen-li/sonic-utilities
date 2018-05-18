@@ -2,6 +2,7 @@ import click
 import os
 import subprocess
 from click_default_group import DefaultGroup
+from sonic_platform import get_system_routing_stack
 
 try:
     import ConfigParser as configparser
@@ -96,36 +97,44 @@ CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help', '-?'])
 
 @click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
 def cli():
-    """SONiC command line - 'undebug' command"""
+    """SONiC undebugging commands for routing events"""
     pass
 
-
 #
-# 'bgp' group ###
+# Inserting 'undebug' functionality into cli's parse-chain. Undebugging commands
+# are determined by the routing-stack being elected.
 #
+routing_stack = get_system_routing_stack()
 
-# This allows us to add commands to both cli and ip groups, allowing for
-@cli.group(cls=AliasedGroup, default_if_no_args=True)
-def bgp():
-    """undebug bgp on """
-    pass
+if routing_stack == "quagga":
 
-@bgp.command(default=True)
-def default():
-    command = 'sudo vtysh -c "undebug bgp"'
-    run_command(command)
+    from .undebug_quagga import bgp
+    cli.add_command(bgp)
+    from .undebug_quagga import zebra
+    cli.add_command(zebra)
 
-@bgp.command()
-def events():
-    """undebug bgp events on """
-    command = 'sudo vtysh -c "undebug bgp events"'
-    run_command(command)
+elif routing_stack == "frr":
 
-@bgp.command()
-def updates():
-    """undebug bgp events on """
-    command = 'sudo vtysh -c "undebug bgp updates"'
-    run_command(command)
+    @cli.command()
+    @click.argument('debug_args', nargs = -1, required = False)
+    def bgp(debug_args):
+        """Debug BGP information"""
+        debug_cmd = "no debug bgp"
+        for arg in debug_args:
+            debug_cmd += " " + str(arg)
+        command = 'sudo vtysh -c "{}"'.format(debug_cmd)
+        run_command(command)
+
+    @cli.command()
+    @click.argument('debug_args', nargs = -1, required = False)
+    def zebra(debug_args):
+        """Debug Zebra information"""
+        debug_cmd = "no debug zebra"
+        for arg in debug_args:
+            debug_cmd += " " + str(arg)
+        command = 'sudo vtysh -c "{}"'.format(debug_cmd)
+        run_command(command)
+
 
 if __name__ == '__main__':
     cli()
