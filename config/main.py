@@ -178,13 +178,52 @@ def save(filename):
     command = "{} -d --print-data > {}".format(SONIC_CFGGEN_PATH, filename)
     run_command(command, display_cmd=True)
 
+@cli.group()
+@click.pass_context
+def check(ctx):
+    "Verifies input configuration validity"
+    pass
+
+@check.command()
+@click.argument('filename', default='/etc/sonic/config_db.json', type=click.Path(exists=True))
+def json(filename):
+    """Verifies json file configuration validity"""
+
+    command = "{} -j {} --check-config".format(SONIC_CFGGEN_PATH, filename)
+    run_command(command, display_cmd=True)
+    print "Valid configuration found in " + filename + " file"
+
+@check.command()
+@click.argument('filename', default='/etc/sonic/minigraph.xml', type=click.Path(exists=True))
+def minigraph(filename):
+    """Verifies minigraph file configuration validity"""
+
+    command = "{} -m {} --check-config".format(SONIC_CFGGEN_PATH, filename)
+    run_command(command, display_cmd=True)
+    print "Valid configuration found in " + filename + " file"
+
+@check.command()
+def database():
+    """Verifies configDB configuration validity"""
+
+    command = "{} -d --check-config".format(SONIC_CFGGEN_PATH)
+    run_command(command, display_cmd=True)
+    print "Valid configuration found in config database"
+
 @cli.command()
 @click.option('-y', '--yes', is_flag=True)
 @click.argument('filename', default='/etc/sonic/config_db.json', type=click.Path(exists=True))
 def load(filename, yes):
     """Import a previous saved config DB dump file."""
+
     if not yes:
         click.confirm('Load config from the file %s?' % filename, abort=True)
+
+    # Validating passed json configuration file
+    command = "{} -j {} --check-config".format(SONIC_CFGGEN_PATH, filename)
+    run_command(command, display_cmd=True)
+
+    # Proceeding to load changes into DB
     command = "{} -j {} --write-to-db".format(SONIC_CFGGEN_PATH, filename)
     run_command(command, display_cmd=True)
 
@@ -195,6 +234,11 @@ def reload(filename, yes):
     """Clear current configuration and import a previous saved config DB dump file."""
     if not yes:
         click.confirm('Clear current config and reload config from the file %s?' % filename, abort=True)
+
+    # Validating passed json configuration file
+    command = "{} -j {} --check-config".format(SONIC_CFGGEN_PATH, filename)
+    run_command(command, display_cmd=True)
+
     #Stop services before config push
     _stop_services()
     config_db = ConfigDBConnector()
@@ -235,6 +279,15 @@ def load_mgmt_config(filename):
                 expose_value=False, prompt='Reload config from minigraph?')
 def load_minigraph():
     """Reconfigure based on minigraph."""
+
+    # Validating config file
+    if os.path.isfile('/etc/sonic/init_cfg.json'):
+        command = "{} -H -m -j /etc/sonic/init_cfg.json --check-config".format(SONIC_CFGGEN_PATH)
+    else:
+        command = "{} -H -m --check-config".format(SONIC_CFGGEN_PATH)
+
+    run_command(command, display_cmd=True)
+
     #Stop services before config push
     _stop_services()
 
@@ -242,11 +295,15 @@ def load_minigraph():
     config_db.connect()
     client = config_db.redis_clients[config_db.CONFIG_DB]
     client.flushdb()
+
+    # Proceeding with the changes
     if os.path.isfile('/etc/sonic/init_cfg.json'):
         command = "{} -H -m -j /etc/sonic/init_cfg.json --write-to-db".format(SONIC_CFGGEN_PATH)
     else:
         command = "{} -H -m --write-to-db".format(SONIC_CFGGEN_PATH)
+
     run_command(command, display_cmd=True)
+
     client.set(config_db.INIT_INDICATOR, 1)
     run_command('pfcwd start_default', display_cmd=True)
     if os.path.isfile('/etc/sonic/acl.json'):
