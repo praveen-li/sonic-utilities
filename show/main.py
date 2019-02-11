@@ -979,7 +979,7 @@ def clock(verbose):
 @click.option('--verbose', is_flag=True, help="Enable verbose output")
 def system_memory(verbose):
     """Show memory information"""
-    command="free -m -h"
+    cmd="free -m -h"
     run_command(cmd, display_cmd=verbose)
 
 @cli.group(cls=AliasedGroup, default_if_no_args=False)
