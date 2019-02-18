@@ -818,7 +818,7 @@ def cpu(verbose):
     # Run top in batch mode to prevent unexpected newline after each newline
     cmd = "top -bn 1 -o %CPU"
     run_command(cmd, display_cmd=verbose)
- 
+
 # 'memory' subcommand
 @processes.command()
 @click.option('--verbose', is_flag=True, help="Enable verbose output")

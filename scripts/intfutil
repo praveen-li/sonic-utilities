@@ -19,6 +19,7 @@ PORT_ADMIN_STATUS = "admin_status"
 PORT_SPEED = "speed"
 PORT_MTU_STATUS = "mtu"
 PORT_DESCRIPTION = "description"
+PORT_FLAP_COUNTER = "flap_counter"
 
 
 def db_connect():
@@ -61,7 +62,7 @@ def db_port_status_get(db, intf_name, status_type):
 
 # ========================== interface-status logic ==========================
 
-header_stat = ['Interface', 'Admin', 'Oper',  'Alias', 'Lanes', 'Speed', 'MTU']
+header_stat = ['Interface', 'Admin', 'Oper',  'Alias', 'Lanes', 'Speed', 'MTU', 'Flaps']
 
 class IntfStatus(object):
 
@@ -87,7 +88,8 @@ class IntfStatus(object):
                               db_port_status_get(self.db, key, PORT_ALIAS),
                               db_port_status_get(self.db, key, PORT_LANES_STATUS),
                               db_port_status_get(self.db, key, PORT_SPEED),
-                              db_port_status_get(self.db, key, PORT_MTU_STATUS)))
+                              db_port_status_get(self.db, key, PORT_MTU_STATUS),
+                              db_port_status_get(self.db, key, PORT_FLAP_COUNTER)))
 
         # Sorting and tabulating the result table.
         sorted_table = natsorted(table)
