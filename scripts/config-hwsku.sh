@@ -60,7 +60,7 @@ config_hwsku_exec() {
 
 check_supported_hwskus() {
     # Check the available HWSKUs
-    platform_dir=$HWSKU_ROOT$platform
+    platform_dir="$HWSKU_ROOT""$platform"/
     supported_hwskus=`ls -l $platform_dir | egrep '^d' | awk '{print $9}' | grep -v plugins | grep -v led-code`
 }
 config_hwsku_fun() {
