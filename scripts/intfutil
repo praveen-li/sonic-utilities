@@ -5,6 +5,8 @@ import sys
 import re
 from tabulate import tabulate
 from natsort import natsorted
+from collections import OrderedDict
+import portstat
 
 
 
@@ -20,6 +22,8 @@ PORT_SPEED = "speed"
 PORT_MTU_STATUS = "mtu"
 PORT_DESCRIPTION = "description"
 PORT_FLAP_COUNTER = "flap_counter"
+PORT_LAST_FLAP_TIME = "last_flap"
+NStats = portstat.NStats
 
 
 def db_connect():
@@ -62,7 +66,7 @@ def db_port_status_get(db, intf_name, status_type):
 
 # ========================== interface-status logic ==========================
 
-header_stat = ['Interface', 'Admin', 'Oper',  'Alias', 'Lanes', 'Speed', 'MTU', 'Flaps']
+header_stat = ['Interface', 'Admin', 'Oper',  'Alias', 'Lanes', 'Speed', 'MTU', 'Flaps', 'Last Flap (in UTC)']
 
 class IntfStatus(object):
 
@@ -75,6 +79,13 @@ class IntfStatus(object):
         table = []
         key = []
 
+        cnstat_cached_dict = OrderedDict()
+        port_obj = portstat.Portstat()
+
+        cached_stats_file_hidden = port_obj.cached_stats_file_hidden
+        cnstat_fqn_file = port_obj.get_file_path(cached_stats_file_hidden)
+        cnstat_dict = port_obj.get_cnstat()
+        cnstat_cached_dict = port_obj.get_cache_dict(cnstat_fqn_file, cnstat_dict)
         #
         # Iterate through all the keys and append port's associated state to
         # the result table.
@@ -82,6 +93,9 @@ class IntfStatus(object):
         for i in db_keys:
             key = re.split(':', i, maxsplit=1)[-1].strip()
             if key and key.startswith('Ethernet'):
+                db_flap = long(db_port_status_get(self.db, key, PORT_FLAP_COUNTER))
+                cache_flap = long(cnstat_cached_dict[key].flap_counter)
+                final_flap = str(db_flap - cache_flap)
                 table.append((key,
                               db_port_status_get(self.db, key, PORT_ADMIN_STATUS),
                               db_port_status_get(self.db, key, PORT_OPER_STATUS),
@@ -89,7 +103,8 @@ class IntfStatus(object):
                               db_port_status_get(self.db, key, PORT_LANES_STATUS),
                               db_port_status_get(self.db, key, PORT_SPEED),
                               db_port_status_get(self.db, key, PORT_MTU_STATUS),
-                              db_port_status_get(self.db, key, PORT_FLAP_COUNTER)))
+                              final_flap,
+                              db_port_status_get(self.db, key, PORT_LAST_FLAP_TIME)))
 
         # Sorting and tabulating the result table.
         sorted_table = natsorted(table)

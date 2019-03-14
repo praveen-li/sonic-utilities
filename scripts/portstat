@@ -2,7 +2,7 @@
 
 #####################################################################
 #
-# portstat is a tool for summarizing network statistics. 
+# portstat is a tool for summarizing network statistics.
 #
 #####################################################################
 
@@ -27,7 +27,7 @@ from fcntl import flock, LOCK_EX, LOCK_NB
 PORT_RATE = 40
 
 NStats = namedtuple("NStats", "rx_ok, rx_err, rx_drop, rx_ovr, tx_ok,\
-                    tx_err, tx_drop, tx_ovr, rx_byt, tx_byt")
+                    tx_err, tx_drop, tx_ovr, rx_byt, tx_byt, flap_counter")
 header_all = ['IFACE', 'STATE', 'RX_OK', 'RX_BPS', 'RX_PPS', 'RX_UTIL', 'RX_ERR', 'RX_DRP', 'RX_OVR',
           'TX_OK', 'TX_BPS', 'Tx_PPS', 'TX_UTIL', 'TX_ERR', 'TX_DRP', 'TX_OVR']
 
@@ -53,7 +53,7 @@ STATUS_NA = 'N/A'
 
 COUNTER_TABLE_PREFIX = "COUNTERS:"
 COUNTERS_PORT_NAME_MAP = "COUNTERS_PORT_NAME_MAP"
-
+PORT_FLAP_COUNTER = "flap_counter"
 PORT_STATUS_TABLE_PREFIX = "PORT_TABLE:"
 PORT_OPER_STATUS_FIELD = "oper_status"
 PORT_ADMIN_STATUS_FIELD = "admin_status"
@@ -64,25 +64,54 @@ PORT_STATE_UP = 'U'
 PORT_STATE_DOWN = 'D'
 PORT_STATE_DISABLED = 'X'
 PORT_SPEED_FIELD = 'speed'
-FIELD_COUNT = 10
-CACHED_STATS_FILE_HIDDEN = ".__CaChEd_StAtS__"
+FIELD_COUNT = 11
 ERR_PER_DEN = 13
 
 class Portstat(object):
+
+    cached_stats_file_hidden = ".__CaChEd_StAtS__"
+    cnstat_dir = "/tmp/portstat"
+
     def __init__(self):
         self.db = swsssdk.SonicV2Connector(host='127.0.0.1')
         self.db.connect(self.db.COUNTERS_DB)
         self.db.connect(self.db.APPL_DB)
 
+    def get_cache_dict(self, cnstat_fqn_file, cnstat_dict):
+
+        cached_dict = OrderedDict()
+        if os.path.isfile(cnstat_fqn_file):
+            try:
+                cached_dict = pickle.load(open(cnstat_fqn_file, 'r'))
+                print "Last cached time was " + str(cached_dict.get('time'))
+            except IOError as e:
+                print e.errno, e
+        else:
+            # Cached Stats file does not exist, so use boot time for Bps calculation.
+            fields = list("0" * FIELD_COUNT)
+            cntr = NStats._make(fields)
+            for key in cnstat_dict:
+                cached_dict[key] = cntr
+            with open('/proc/uptime', 'r') as uptime_f:
+                time_diff = datetime.timedelta(seconds = float(uptime_f.readline().split()[0]))
+                cached_dict['time'] = cnstat_dict.get('time') - time_diff
+
+        return cached_dict
+
     def get_cnstat(self):
         """
             Get the counters info from database.
         """
-        def get_counters(table_id):
+
+        def get_counters(port, table_id):
+
             """
                 Get the counters from specific table.
             """
+
             fields = list("0" * FIELD_COUNT)
+            flap_table_id = PORT_STATUS_TABLE_PREFIX + port
+            flap_data = self.db.get(self.db.APPL_DB, flap_table_id, PORT_FLAP_COUNTER)
             for counter_name, pos in counter_bucket_dict.iteritems():
                 full_table_id = COUNTER_TABLE_PREFIX + table_id
                 counter_data =  self.db.get(self.db.COUNTERS_DB, full_table_id, counter_name)
@@ -90,9 +119,9 @@ class Portstat(object):
                     fields[pos] = STATUS_NA
                 elif fields[pos] != STATUS_NA:
                     fields[pos] = str(int(fields[pos]) + int(counter_data))
+            fields[FIELD_COUNT-1] = str(int(fields[FIELD_COUNT-1]) + int(flap_data))
             cntr = NStats._make(fields)
             return cntr
-
         # Get the info from database
         counter_port_name_map = self.db.get_all(self.db.COUNTERS_DB, COUNTERS_PORT_NAME_MAP);
         # Build a dictionary of the stats
@@ -101,7 +130,7 @@ class Portstat(object):
         if counter_port_name_map is None:
             return cnstat_dict
         for port in natsorted(counter_port_name_map):
-            cnstat_dict[port] = get_counters(counter_port_name_map[port]) 
+            cnstat_dict[port] = get_counters(port, counter_port_name_map[port])
         return cnstat_dict
 
     def get_port_state(self, port_name):
@@ -149,7 +178,7 @@ class Portstat(object):
             for line in table:
                 if_name = line[0]
                 output[if_name] = {header[i]: line[i] for i in range(1, len(header))}
-     
+
         return json.dumps(output, indent=4, sort_keys=True)
 
     def cnstat_print(self, cnstat_dict, use_json, print_all):
@@ -323,6 +352,11 @@ class Portstat(object):
             else:
                 print tabulate(table, header, tablefmt='simple', stralign='right')
 
+    def get_file_path(self, cnstat_file):
+
+        cnstat_fqn_file = self.cnstat_dir + "/" + cnstat_file
+        return cnstat_fqn_file
+
 
 def main():
     parser  = argparse.ArgumentParser(description='Display the ports state and counters',
@@ -360,20 +394,22 @@ Examples:
     wait_time_in_seconds = args.period
     print_all = args.all
 
-    if tag_name is not None:
-        cnstat_file = CACHED_STATS_FILE_HIDDEN + tag_name
-    else:
-        cnstat_file = CACHED_STATS_FILE_HIDDEN
+    portstat = Portstat()
 
-    cnstat_dir = "/tmp/portstat"
-    cnstat_fqn_file = cnstat_dir + "/" + cnstat_file
+    cnstat_directory = portstat.cnstat_dir
+    if tag_name is not None:
+        cnstat_file = portstat.cached_stats_file_hidden + tag_name
+    else:
+        cnstat_file = portstat.cached_stats_file_hidden
+
+    cnstat_fqn_file = portstat.get_file_path(cnstat_file)
 
     if delete_all_stats:
-        for file in os.listdir(cnstat_dir):
-            os.remove(cnstat_dir + "/" + file)
+        for file in os.listdir(cnstat_directory):
+            os.remove(cnstat_directory + "/" + file)
 
         try:
-            os.rmdir(cnstat_dir)
+            os.rmdir(cnstat_directory)
             sys.exit(0)
         except IOError as e:
             print e.errno, e
@@ -387,11 +423,10 @@ Examples:
                 print e.errno, e
                 sys.exit(1)
         finally:
-            if os.listdir(cnstat_dir) == []:
-                os.rmdir(cnstat_dir)
+            if os.listdir(cnstat_directory) == []:
+                os.rmdir(cnstat_directory)
             sys.exit(0)
 
-    portstat = Portstat()
     cnstat_dict = portstat.get_cnstat()
 
     # Now decide what information to display
@@ -400,9 +435,9 @@ Examples:
         sys.exit(0)
 
     # At this point, either we'll create a file or open an existing one.
-    if not os.path.exists(cnstat_dir):
+    if not os.path.exists(cnstat_directory):
         try:
-            os.makedirs(cnstat_dir)
+            os.makedirs(cnstat_directory)
         except IOError as e:
             print e.errno, e
             sys.exit(1)
@@ -433,28 +468,18 @@ Examples:
 
     if wait_time_in_seconds == 0:
         cnstat_cached_dict = OrderedDict()
-        if os.path.isfile(cnstat_fqn_file):
-            try:
-                cnstat_cached_dict = pickle.load(open(cnstat_fqn_file, 'r'))
-                print "Last cached time was " + str(cnstat_cached_dict.get('time'))
-                portstat.cnstat_diff_print(cnstat_dict, cnstat_cached_dict, use_json, print_all)
-            except IOError as e:
-                print e.errno, e
+        if not os.path.isfile(cnstat_fqn_file) and tag_name:
+            print "\nFile '%s' does not exist" % cnstat_fqn_file
+            print "Did you run 'portstat -c -t %s' to record the counters via tag %s?\n" % (tag_name, tag_name)
         else:
-            if tag_name:
-                print "\nFile '%s' does not exist" % cnstat_fqn_file
-                print "Did you run 'portstat -c -t %s' to record the counters via tag %s?\n" % (tag_name, tag_name)
-            else:
-                # Cached Stats file does not exist, so use boot time for Bps calculation.
-                with open('/proc/uptime', 'r') as uptime_f:
-                    time_diff = datetime.timedelta(seconds = float(uptime_f.readline().split()[0]))
-                    cnstat_cached_dict['time'] = cnstat_dict.get('time') - time_diff
-                portstat.cnstat_diff_print(cnstat_dict, cnstat_cached_dict, use_json, print_all)
+            cnstat_cached_dict = portstat.get_cache_dict(cnstat_fqn_file, cnstat_dict)
+            portstat.cnstat_diff_print(cnstat_dict, cnstat_cached_dict, use_json, print_all)
+
     else:
         #wait for the specified time and then gather the new stats and output the difference.
         time.sleep(wait_time_in_seconds)
         print "The rates are calculated within %s seconds period" % wait_time_in_seconds
-        cnstat_new_dict = portstat.get_cnstat()
+        cnstat_dict = portstat.get_cnstat()
         portstat.cnstat_diff_print(cnstat_new_dict, cnstat_dict, use_json, print_all)
 
 if __name__ == "__main__":
