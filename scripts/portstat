@@ -405,6 +405,8 @@ Examples:
     cnstat_fqn_file = portstat.get_file_path(cnstat_file)
 
     if delete_all_stats:
+        if not os.path.isdir(cnstat_directory):
+            sys.exit(0)
         for file in os.listdir(cnstat_directory):
             os.remove(cnstat_directory + "/" + file)
 
@@ -416,6 +418,8 @@ Examples:
             sys.exit(e)
 
     if delete_saved_stats:
+        if not os.path.isdir(cnstat_directory):
+            sys.exit(0)
         try:
             os.remove(cnstat_fqn_file)
         except IOError as e:
