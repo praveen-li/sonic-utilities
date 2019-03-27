@@ -26,6 +26,7 @@ setup(
         'pfcwd',
         'sfputil',
         'psuutil',
+	'sensorutil',
         'show',
         'sonic_installer',
         'sonic-utilities-tests',
@@ -70,6 +71,7 @@ setup(
             'pfcwd = pfcwd.main:cli',
             'sfputil = sfputil.main:cli',
             'psuutil = psuutil.main:cli',
+            'sensorutil = sensorutil.main:cli',
             'show = show.main:cli',
             'sonic-clear = clear.main:cli',
             'sonic_installer = sonic_installer.main:cli',
@@ -80,7 +82,7 @@ setup(
         'click-default-group',
         'click',
         'natsort',
-        'tabulate'
+        'tabulate',
     ],
     classifiers=[
         'Development Status :: 3 - Alpha',

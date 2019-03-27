@@ -818,7 +818,7 @@ def vlan(vid, verbose):
 @click.option('--verbose', is_flag=True, help="Enable verbose output")
 def environment(verbose):
     """Show environmentals (voltages, fans, temps)"""
-    cmd = "sudo sensors"
+    cmd = "sudo sensorutil summary"
     run_command(cmd, display_cmd=verbose)
 
 
