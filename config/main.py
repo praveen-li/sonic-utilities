@@ -401,6 +401,40 @@ def del_vlan(ctx, vid):
         db.set_entry('VLAN_MEMBER', k, None)
     db.set_entry('VLAN', 'Vlan{}'.format(vid), None)
 
+@vlan.command('dhcp_relay')
+@click.argument('helper_ip', metavar='<helper_ip>', required=True)
+@click.argument('vid', metavar='<vid>', type=int, required=False)
+@click.pass_context
+def helper_ip(ctx, helper_ip, vid):
+    db = ctx.obj['db']
+    vlan_table_dict = db.get_table('VLAN')
+
+    if vid is None:
+	if not vlan_table_dict:
+		ctx.fail("No VLAN is configured yet")
+	else:
+		for vkey in vlan_table_dict.keys():
+			if 'dhcp_servers' in vlan_table_dict[vkey]:
+				db.mod_entry('VLAN', '{}'.format(vkey), {'dhcp_servers@': '{}'.format(helper_ip)})
+			else:
+				db.set_entry('VLAN', '{}'.format(vkey), {'dhcp_servers@': '{}'.format(helper_ip)})
+
+    else:
+	vlan_name = 'Vlan{}'.format(vid)
+	vlan_entry = db.get_entry('VLAN', vlan_name)
+	if len(vlan_entry) == 0:
+		ctx.fail("{} doesn't exist".format(vlan_name))
+	elif 'dhcp_servers' in vlan_entry:
+		db.mod_entry('VLAN', 'Vlan{}'.format(vid), {'dhcp_servers@': '{}'.format(helper_ip)})
+	else:
+		db.set_entry('VLAN', 'Vlan{}'.format(vid), {'dhcp_servers@': '{}'.format(helper_ip)})
+
+    try:
+	run_command("service dhcp_relay restart", display_cmd=True)
+    except SystemExit as e:
+	click.echo("Restarting dhcp_relay service failed with error {}".format(e))
+        raise
+
 @vlan.group('member')
 @click.pass_context
 def vlan_member(ctx):

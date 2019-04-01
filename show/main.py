@@ -781,6 +781,36 @@ def version():
     os.remove(VERSION_TEMPLATE_FILE)
 
 #
+# 'dhcp_relay' command ("show dhcp_relay")
+#
+
+@cli.group(cls=AliasedGroup, default_if_no_args=False)
+def dhcp_relay():
+    """Show dhcp-relay helper ip for all vlan"""
+    pass
+
+@dhcp_relay.command()
+@click.argument('vid', metavar='<vid>', required=False, type=int)
+@click.option('--verbose', is_flag=True, help="Enable verbose output")
+def vlan(vid, verbose):
+    """Show dhcp-relay helper ip for a vlan"""
+    config_db = ConfigDBConnector()
+    config_db.connect()
+    vlan_dict = config_db.get_table('VLAN')
+
+    header = ['VLAN ID', 'HELPER IP']
+    body = []
+    if vid is not None:
+        vlan = 'Vlan'+str(vid)
+        if vlan in vlan_dict.keys():
+                body.append([vlan, vlan_dict[vlan]['dhcp_servers'][0].encode("utf-8")])
+    else:
+        for vlan in vlan_dict.keys():
+                body.append([vlan, vlan_dict[vlan]['dhcp_servers'][0].encode("utf-8")])
+
+    click.echo(tabulate(body, header))
+
+#
 # 'environment' command ("show environment")
 #
 
