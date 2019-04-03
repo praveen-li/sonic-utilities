@@ -58,6 +58,7 @@ setup(
         'scripts/teamshow',
         'scripts/config-hwsku.sh',
         'scripts/portstat.py',
+	'scripts/syslog_helper.py'
     ],
     data_files=[
         ('/etc/bash_completion.d', glob.glob('data/etc/bash_completion.d/*')),
