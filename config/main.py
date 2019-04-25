@@ -142,6 +142,12 @@ def _abort_if_false(ctx, param, value):
     if not value:
         ctx.abort()
 
+def _get_all_interfaces():
+    config_db = ConfigDBConnector()
+    config_db.connect()
+    interface_table_list = config_db.get_table('INTERFACE').keys()
+    return interface_table_list
+
 def _stop_services():
     run_command("service dhcp_relay stop", display_cmd=True)
     run_command("service swss stop", display_cmd=True)
@@ -567,7 +573,11 @@ def interface():
 @click.option('-v', '--verbose', is_flag=True, help="Enable verbose output")
 def shutdown(interface_name, verbose):
     """Shut down interface"""
-    command = "ifdown {}".format(interface_name)
+    interface_table_list = _get_all_interfaces()
+    if interface_name in dict(interface_table_list):
+        command = "ifdown {}".format(interface_name)
+    else:
+        command = "ip link set {} down".format(interface_name)
     run_command(command, display_cmd=verbose)
 
 #
@@ -579,7 +589,11 @@ def shutdown(interface_name, verbose):
 @click.option('-v', '--verbose', is_flag=True, help="Enable verbose output")
 def startup(interface_name, verbose):
     """Start up interface"""
-    command = "ifup {}".format(interface_name)
+    interface_table_list = _get_all_interfaces()
+    if interface_name in dict(interface_table_list):
+        command = "ifup {}".format(interface_name)
+    else:
+        command = "ip link set {} up".format(interface_name)
     run_command(command, display_cmd=verbose)
 
 #
