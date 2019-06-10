@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import click
+import ipaddr
 import json
 import syslog
 import tabulate
@@ -85,8 +86,8 @@ class AclLoader(object):
         self.sessions_db_info = {}
         self.configdb = ConfigDBConnector()
         self.configdb.connect()
-        self.appdb = SonicV2Connector(host="127.0.0.1")
-        self.appdb.connect(self.appdb.APPL_DB)
+        self.statedb = SonicV2Connector(host="127.0.0.1")
+        self.statedb.connect(self.statedb.STATE_DB)
 
         self.read_tables_info()
         self.read_rules_info()
@@ -119,9 +120,9 @@ class AclLoader(object):
         """
         self.sessions_db_info = self.configdb.get_table(self.MIRROR_SESSION)
         for key in self.sessions_db_info.keys():
-            app_db_info = self.appdb.get_all(self.appdb.APPL_DB, "{}:{}".format(self.MIRROR_SESSION, key))
-            if app_db_info:
-                status = app_db_info.get("status", "inactive")
+            state_db_info = self.statedb.get_all(self.statedb.STATE_DB, "{}|{}".format(self.MIRROR_SESSION, key))
+            if state_db_info:
+                status = state_db_info.get("status", "inactive")
             else:
                 status = "error"
             self.sessions_db_info[key]["status"] = status
@@ -193,6 +194,17 @@ class AclLoader(object):
         """
         return self.tables_db_info[tname]['type'].upper() == self.ACL_TABLE_TYPE_CTRLPLANE
 
+    @staticmethod
+    def parse_acl_json(filename):
+        yang_acl = pybindJSON.load(filename, openconfig_acl, "openconfig_acl")
+        # Check pybindJSON parsing
+        # pybindJSON.load will silently return an empty json object if input invalid
+        with open(filename, 'r') as f:
+            plain_json = json.load(f)
+            if len(plain_json['acl']['acl-sets']['acl-set']) != len(yang_acl.acl.acl_sets.acl_set):
+                raise AclLoaderException("Invalid input file %s" % filename)
+        return yang_acl
+
     def load_rules_from_file(self, filename):
         """
         Load file with ACL rules configuration in openconfig ACL format. Convert rules
@@ -200,7 +212,7 @@ class AclLoader(object):
         :param filename: File in openconfig ACL format
         :return:
         """
-        self.yang_acl = pybindJSON.load(filename, openconfig_acl, "openconfig_acl")
+        self.yang_acl = AclLoader.parse_acl_json(filename)
         self.convert_rules()
 
     def convert_action(self, table_name, rule_idx, rule):
@@ -242,7 +254,7 @@ class AclLoader(object):
 
         return rule_props
 
-    def convert_ipv4(self, table_name, rule_idx, rule):
+    def convert_ip(self, table_name, rule_idx, rule):
         rule_props = {}
 
         if rule.ip.config.protocol:
@@ -258,10 +270,18 @@ class AclLoader(object):
                 rule_props["IP_PROTOCOL"] = rule.ip.config.protocol
 
         if rule.ip.config.source_ip_address:
-            rule_props["SRC_IP"] = rule.ip.config.source_ip_address
+            source_ip_address = rule.ip.config.source_ip_address.encode("ascii")
+            if ipaddr.IPNetwork(source_ip_address).version == 4:
+                rule_props["SRC_IP"] = source_ip_address
+            else:
+                rule_props["SRC_IPV6"] = source_ip_address
 
         if rule.ip.config.destination_ip_address:
-            rule_props["DST_IP"] = rule.ip.config.destination_ip_address
+            destination_ip_address = rule.ip.config.destination_ip_address.encode("ascii")
+            if ipaddr.IPNetwork(destination_ip_address).version == 4:
+                rule_props["DST_IP"] = destination_ip_address
+            else:
+                rule_props["DST_IPV6"] = destination_ip_address
 
         # NOTE: DSCP is available only for MIRROR table
         if self.is_table_mirror(table_name):
@@ -285,7 +305,7 @@ class AclLoader(object):
         else:
             return port, False
 
-    def convert_transport(self,  table_name, rule_idx, rule):
+    def convert_transport(self, table_name, rule_idx, rule):
         rule_props = {}
 
         if rule.transport.config.source_port:
@@ -320,6 +340,14 @@ class AclLoader(object):
 
         return rule_props
 
+    def convert_input_interface(self, table_name, rule_idx, rule):
+        rule_props = {}
+
+        if rule.input_interface.interface_ref.config.interface:
+            rule_props["IN_PORTS"] = rule.input_interface.interface_ref.config.interface
+
+        return rule_props
+
     def convert_rule_to_db_schema(self, table_name, rule):
         """
         Convert rules format from openconfig ACL to Config DB schema
@@ -331,12 +359,13 @@ class AclLoader(object):
         rule_props = {}
         rule_data = {(table_name, "RULE_" + str(rule_idx)): rule_props}
 
-        rule_props["PRIORITY"] = self.max_priority - rule_idx
+        rule_props["PRIORITY"] = str(self.max_priority - rule_idx)
 
         deep_update(rule_props, self.convert_action(table_name, rule_idx, rule))
         deep_update(rule_props, self.convert_l2(table_name, rule_idx, rule))
-        deep_update(rule_props, self.convert_ipv4(table_name, rule_idx, rule))
+        deep_update(rule_props, self.convert_ip(table_name, rule_idx, rule))
         deep_update(rule_props, self.convert_transport(table_name, rule_idx, rule))
+        deep_update(rule_props, self.convert_input_interface(table_name, rule_idx, rule))
 
         return rule_data
 
@@ -348,8 +377,8 @@ class AclLoader(object):
         """
         rule_props = {}
         rule_data = {(table_name, "DEFAULT_RULE"): rule_props}
-        rule_props["PRIORITY"] = self.min_priority
-        rule_props["ETHER_TYPE"] = self.ethertype_map["ETHERTYPE_IPV4"]
+        rule_props["PRIORITY"] = str(self.min_priority)
+        rule_props["ETHER_TYPE"] = str(self.ethertype_map["ETHERTYPE_IPV4"])
         rule_props["PACKET_ACTION"] = "DROP"
         return rule_data
 
@@ -359,7 +388,7 @@ class AclLoader(object):
         :return:
         """
         for acl_set_name in self.yang_acl.acl.acl_sets.acl_set:
-            table_name = acl_set_name.replace(" ", "_").replace("-", "_").upper()
+            table_name = acl_set_name.replace(" ", "_").replace("-", "_").upper().encode('ascii')
             acl_set = self.yang_acl.acl.acl_sets.acl_set[acl_set_name]
 
             if not self.is_table_valid(table_name):
@@ -401,23 +430,54 @@ class AclLoader(object):
         modifications.
         :return:
         """
+
+        # TODO: Until we test ASIC behavior, we cannot assume that we can insert
+        # dataplane ACLs and shift existing ACLs. Therefore, we perform a full
+        # update on dataplane ACLs, and only perform an incremental update on
+        # control plane ACLs.
+
         new_rules = set(self.rules_info.iterkeys())
+        new_dataplane_rules = set()
+        new_controlplane_rules = set()
         current_rules = set(self.rules_db_info.iterkeys())
+        current_dataplane_rules = set()
+        current_controlplane_rules = set()
 
-        added_rules = new_rules.difference(current_rules)
-        removed_rules = current_rules.difference(new_rules)
-        existing_rules = new_rules.intersection(current_rules)
+        for key in new_rules:
+            table_name = key[0]
+            if self.tables_db_info[table_name]['type'].upper() == self.ACL_TABLE_TYPE_CTRLPLANE:
+                new_controlplane_rules.add(key)
+            else:
+                new_dataplane_rules.add(key)
 
-        for key in removed_rules:
+        for key in current_rules:
+            table_name = key[0]
+            if self.tables_db_info[table_name]['type'].upper() == self.ACL_TABLE_TYPE_CTRLPLANE:
+                current_controlplane_rules.add(key)
+            else:
+                current_dataplane_rules.add(key)
+
+        # Remove all existing dataplane rules
+        for key in current_dataplane_rules:
             self.configdb.mod_entry(self.ACL_RULE, key, None)
 
-        for key in added_rules:
+        # Add all new dataplane rules
+        for key in new_dataplane_rules:
             self.configdb.mod_entry(self.ACL_RULE, key, self.rules_info[key])
 
-        for key in existing_rules:
-            if cmp(self.rules_info[key], self.rules_db_info[key]):
-                self.configdb.mod_entry(self.ACL_RULE, key, None)
-                self.configdb.mod_entry(self.ACL_RULE, key, self.rules_info[key])
+        added_controlplane_rules = new_controlplane_rules.difference(current_controlplane_rules)
+        removed_controlplane_rules = current_controlplane_rules.difference(new_controlplane_rules)
+        existing_controlplane_rules = new_rules.intersection(current_controlplane_rules)
+
+        for key in added_controlplane_rules:
+            self.configdb.mod_entry(self.ACL_RULE, key, self.rules_info[key])
+
+        for key in removed_controlplane_rules:
+            self.configdb.mod_entry(self.ACL_RULE, key, None)
+
+        for key in existing_controlplane_rules:
+            if cmp(self.rules_info[key], self.rules_db_info[key]) != 0:
+                self.configdb.set_entry(self.ACL_RULE, key, self.rules_info[key])
 
 
     def delete(self, table=None, rule=None):
@@ -518,6 +578,9 @@ class AclLoader(object):
             matches = ["%s: %s" % (k, v) for k, v in val.iteritems() if k not in ignore_list]
 
             matches.sort()
+
+            if len(matches) == 0:
+                matches.append("N/A")
 
             rule_data = [[tname, rid, priority, action, matches[0]]]
             if len(matches) > 1:

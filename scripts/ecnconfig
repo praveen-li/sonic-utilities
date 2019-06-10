@@ -1,23 +1,50 @@
 #!/usr/bin/python
 """
-ecnconfig is the utility to show and change ECN configuration
+ecnconfig is the utility to
+
+1) show and change ECN configuration
 
 usage: ecnconfig [-h] [-v] [-l] [-p PROFILE] [-gmin GREEN_MIN]
                  [-gmax GREEN_MAX] [-ymin YELLOW_MIN] [-ymax YELLOW_MAX]
-                 [-rmin RED_MIN] [-rmax RED_MAX] [-vv]
+                 [-rmin RED_MIN] [-rmax RED_MAX] [-gdrop GREEN_DROP_PROB]
+                 [-ydrop YELLOW_DROP_PROB] [-rdrop RED_DROP_PROB] [-vv]
 
 optional arguments:
   -h     --help                show this help message and exit
   -v     --version             show program's version number and exit
   -vv    --verbose             verbose output
   -l     --list                show ECN WRED configuration
-  -p'    --profile             specify WRED profile name
+  -p     --profile             specify WRED profile name
   -gmin  --green-min           set min threshold for packets marked green
   -gmax  --green-max           set max threshold for packets marked green
   -ymin  --yellow-min          set min threshold for packets marked yellow
   -ymax  --yellow-max          set max threshold for packets marked yellow
   -rmin  --red-min             set min threshold for packets marked red
   -rmax  --red-max             set max threshold for packets marked red
+  -gdrop --green-drop-prob     set drop probability for packets marked green
+  -ydrop --yellow-drop-prob    set drop probability for packets marked yellow
+  -rdrop --red-drop-prob       set drop probability for packets marked red
+
+2) show and change ECN on/off status on queues
+
+usage: ecnconfig [-h] [-v] [-q QUEUE_INDEX] [{on,off}] [-vv]
+
+positional arguments:
+  {on,off}                  turn on/off ecn
+
+optional arguments:
+  -h     --help                show this help message and exit
+  -v     --version             show program's version number and exit
+  -vv    --verbose             verbose output
+  -q     --queue               specify queue index list
+
+Sample outputs:
+$ecnconfig -q 3 on -vv
+Enable ECN on Ethernet0,Ethernet4,Ethernet8,Ethernet12,Ethernet16,Ethernet20,Ethernet24,Ethernet28,Ethernet32,Ethernet36,Ethernet40,Ethernet44,Ethernet48,Ethernet52,Ethernet56,Ethernet60,Ethernet64,Ethernet68,Ethernet72,Ethernet76,Ethernet80,Ethernet84,Ethernet88,Ethernet92,Ethernet96,Ethernet100,Ethernet104,Ethernet108,Ethernet112,Ethernet116,Ethernet120,Ethernet124 queue 3
+
+$ecnconfig -q 3
+ECN status:
+queue 3: on
 """
 from __future__ import print_function
 
@@ -35,8 +62,20 @@ WRED_CONFIG_FIELDS = {
     "ymax": "yellow_max_threshold",
     "ymin": "yellow_min_threshold",
     "rmax": "red_max_threshold",
-    "rmin": "red_min_threshold"
+    "rmin": "red_min_threshold",
+    "gdrop": "green_drop_probability",
+    "ydrop": "yellow_drop_probability",
+    "rdrop": "red_drop_probability"
 }
+
+PORT_TABLE_NAME            = "PORT"
+QUEUE_TABLE_NAME           = "QUEUE"
+DEVICE_NEIGHBOR_TABLE_NAME = "DEVICE_NEIGHBOR"
+FIELD                      = "wred_profile"
+ON                         = "[WRED_PROFILE|AZURE_LOSSLESS]"
+OFF                        = "[]"
+
+lossless_queues         = ['3', '4']
 
 class EcnConfig(object):
     """
@@ -52,30 +91,110 @@ class EcnConfig(object):
         self.db.connect()
 
     def list(self):
-        wred_tables = self.db.get_table(WRED_PROFILE_TABLE_NAME)
-        for table in wred_tables:
-            profile_name = table
-            profile_data = wred_tables[table]
+        wred_profiles = self.db.get_table(WRED_PROFILE_TABLE_NAME)
+        for name, data in wred_profiles.items():
+            profile_name = name
+            profile_data = data
             config = []
             print("Profile: " + profile_name)
-            for field in profile_data:
-                line = [field, profile_data[field]]
+            for field, value in profile_data.items():
+                line = [field, value]
                 config.append(line)
             print(tabulate(config) + "\n")
         if self.verbose:
-            print("Total profiles: %d" % len(wred_tables))
+            print("Total profiles: %d" % len(wred_profiles))
 
     def set_wred_threshold(self, profile, threshold, value):
+        if os.geteuid() != 0:
+            sys.exit("Root privileges required for this operation")
+
+        v = int(value)
+        if v < 0 :
+            raise Exception("Invalid %s" % (threshold))
+
         field = WRED_CONFIG_FIELDS[threshold]
         if self.verbose:
             print("Setting %s value to %s" % (field, value))
         self.db.mod_entry(WRED_PROFILE_TABLE_NAME, profile, {field: value})
 
+    def set_wred_prob(self, profile, drop_color, value):
+        if os.geteuid() != 0:
+            sys.exit("Root privileges required for this operation")
+
+        v = int(value)
+        if v < 0 or v > 100:
+            raise Exception("Invalid %s" % (drop_color))
+
+        field = WRED_CONFIG_FIELDS[drop_color]
+        if self.verbose:
+            print("Setting %s value to %s%%" % (field, value))
+        self.db.mod_entry(WRED_PROFILE_TABLE_NAME, profile, {field: value})
+
+class EcnQ(object):
+    """
+    Process ecn on/off on queues
+    """
+    def __init__(self, queues, verbose):
+        self.ports_key = []
+        self.queues = queues.split(',')
+        self.validate_queues()
+        self.verbose = verbose
+
+        # Set up db connections
+        self.config_db = swsssdk.ConfigDBConnector()
+        self.config_db.connect()
+
+        self.db = swsssdk.SonicV2Connector(host="127.0.0.1")
+        self.db.connect(self.db.CONFIG_DB)
+
+        self.gen_ports_key()
+
+    def validate_queues(self):
+        for q in self.queues:
+            if q not in lossless_queues:
+                sys.exit('Invalid queue index: %s' % q)
+
+    def gen_ports_key(self):
+        if self.ports_key is not None:
+            port_table = self.config_db.get_table(DEVICE_NEIGHBOR_TABLE_NAME)
+            self.ports_key = port_table.keys()
+
+            self.ports_key.sort(key = lambda k: int(k[8:]))
+
+    def set(self, enable):
+        if os.geteuid() != 0:
+            sys.exit("Root privileges required for this operation")
+        for queue in self.queues:
+            if self.verbose:
+                print("%s ECN on %s queue %s" % ("Enable" if enable else "Disable", ','.join(self.ports_key), queue))
+            for port_key in self.ports_key:
+                key = '|'.join([port_key, queue])
+                self.config_db.mod_entry(QUEUE_TABLE_NAME, key, {FIELD: ON if enable else OFF})
+
+    def get(self):
+        print("ECN status:")
+        for queue in self.queues:
+            out = ' '.join(['queue', queue])
+            if self.verbose:
+                out = ' '.join([','.join(self.ports_key), out])
+
+            # ecn on/off status on a queue index is homogeneous among all ports
+            # checking one port is sufficient
+            key = '|'.join([QUEUE_TABLE_NAME, self.ports_key[0], queue])
+            val = self.db.get(self.db.CONFIG_DB, key, FIELD)
+
+            if val == ON:
+                print("%s: on" % (out))
+            else:
+                print("%s: off" % (out))
+
 def main():
-    parser = argparse.ArgumentParser(description='Show and change ECN WRED configuration',
+    parser = argparse.ArgumentParser(description='Show and change:\n'
+                                                 '1) ECN WRED configuration\n'
+                                                 '2) ECN on/off status on queues',
                                      version='1.0.0',
                                      formatter_class=argparse.RawTextHelpFormatter)
-    # group = parser.add_mutually_exclusive_group()
+
     parser.add_argument('-l', '--list', action='store_true', help='show ECN WRED configuration')
     parser.add_argument('-p', '--profile', type=str, help='specify WRED profile name', default=None)
     parser.add_argument('-gmin', '--green-min', type=str, help='set min threshold for packets marked \'green\'', default=None)
@@ -84,37 +203,60 @@ def main():
     parser.add_argument('-ymax', '--yellow-max', type=str, help='set max threshold for packets marked \'yellow\'', default=None)
     parser.add_argument('-rmin', '--red-min', type=str, help='set min threshold for packets marked \'red\'', default=None)
     parser.add_argument('-rmax', '--red-max', type=str, help='set max threshold for packets marked \'red\'', default=None)
+    parser.add_argument('-gdrop', '--green-drop-prob', type=str, help='set drop probability for packets marked \'green\'', default=None)
+    parser.add_argument('-ydrop', '--yellow-drop-prob', type=str, help='set drop probability for packets marked \'yellow\'', default=None)
+    parser.add_argument('-rdrop', '--red-drop-prob', type=str, help='set drop probability for packets marked \'red\'', default=None)
     parser.add_argument('-vv', '--verbose', action='store_true', help='Verbose output', default=False)
+
+    parser.add_argument('command', nargs='?', choices=['on', 'off'], type=str, help='turn on/off ecn', default=None)
+    parser.add_argument('-q', '--queue', type=str, help='specify queue index list: 3,4', default=None)
+
     args = parser.parse_args()
 
     try:
-        ecn = EcnConfig(args.verbose)
-        if args.list:
-            if len(sys.argv) > (3 if args.verbose else 2):
-                raise Exception("Input arguments error. No set options allowed when -l[ist] specified")
-            ecn.list()
-        elif args.profile:
-            if len(sys.argv) < (5 if args.verbose else 4):
-                raise Exception("Input arguments error. Specify at least one threshold parameter to set")
-            # the following parameters can be combined in one run
-            if args.green_max:
-                ecn.set_wred_threshold(args.profile, "gmax", args.green_max)
-            if args.green_min:
-                ecn.set_wred_threshold(args.profile, "gmin", args.green_min)
-            if args.yellow_max:
-                ecn.set_wred_threshold(args.profile, "ymax", args.yellow_max)
-            if args.yellow_min:
-                ecn.set_wred_threshold(args.profile, "ymin", args.yellow_min)
-            if args.red_max:
-                ecn.set_wred_threshold(args.profile, "rmax", args.red_max)
-            if args.red_min:
-                ecn.set_wred_threshold(args.profile, "rmin", args.red_min)
+        if args.list or args.profile:
+            prof_cfg = EcnConfig(args.verbose)
+            if args.list:
+                if len(sys.argv) > (3 if args.verbose else 2):
+                    raise Exception("Input arguments error. No set options allowed when -l[ist] specified")
+                prof_cfg.list()
+            elif args.profile:
+                if len(sys.argv) < (5 if args.verbose else 4):
+                    raise Exception("Input arguments error. Specify at least one threshold parameter to set")
+                # the following parameters can be combined in one run
+                if args.green_max:
+                    prof_cfg.set_wred_threshold(args.profile, "gmax", args.green_max)
+                if args.green_min:
+                    prof_cfg.set_wred_threshold(args.profile, "gmin", args.green_min)
+                if args.yellow_max:
+                    prof_cfg.set_wred_threshold(args.profile, "ymax", args.yellow_max)
+                if args.yellow_min:
+                    prof_cfg.set_wred_threshold(args.profile, "ymin", args.yellow_min)
+                if args.red_max:
+                    prof_cfg.set_wred_threshold(args.profile, "rmax", args.red_max)
+                if args.red_min:
+                    prof_cfg.set_wred_threshold(args.profile, "rmin", args.red_min)
+                if args.green_drop_prob:
+                    prof_cfg.set_wred_prob(args.profile, "gdrop", args.green_drop_prob)
+                if args.yellow_drop_prob:
+                    prof_cfg.set_wred_prob(args.profile, "ydrop", args.yellow_drop_prob)
+                if args.red_drop_prob:
+                    prof_cfg.set_wred_prob(args.profile, "rdrop", args.red_drop_prob)
+        elif args.queue:
+            if len(sys.argv) < (4 if args.verbose else 3):
+                raise Exception("Input arguments error. Specify at least one queue by index")
+
+            q_ecn = EcnQ(args.queue, args.verbose)
+            if not args.command:
+                q_ecn.get()
+            else:
+                q_ecn.set(enable = True if args.command == 'on' else False)
         else:
             parser.print_help()
             sys.exit(1)
 
     except Exception as e:
-        print(e.message, file=sys.stderr)
+        print("Exception caught: ", e.message, file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":
