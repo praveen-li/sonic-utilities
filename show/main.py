@@ -145,31 +145,6 @@ class AliasedGroup(DefaultGroup):
         ctx.fail('Too many matches: %s' % ', '.join(sorted(matches)))
 
 
-# To be enhanced. Routing-stack information should be collected from a global
-# location (configdb?), so that we prevent the continous execution of this
-# bash oneliner. To be revisited once routing-stack info is tracked somewhere.
-def get_routing_stack():
-    command = "sudo docker ps | grep bgp | awk '{print$2}' | cut -d'-' -f3 | cut -d':' -f1"
-
-    try:
-        proc = subprocess.Popen(command,
-                                stdout=subprocess.PIPE,
-                                shell=True,
-                                stderr=subprocess.STDOUT)
-        stdout = proc.communicate()[0]
-        proc.wait()
-        result = stdout.rstrip('\n')
-
-    except OSError, e:
-        raise OSError("Cannot detect routing-stack")
-
-    return (result)
-
-
-# Global Routing-Stack variable
-routing_stack = get_routing_stack()
-
-
 def run_command(command, display_cmd=False):
     if display_cmd:
         click.echo(click.style("Command: ", fg='cyan') + click.style(command, fg='green'))
