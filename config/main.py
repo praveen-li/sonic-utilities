@@ -351,7 +351,7 @@ def save(filename):
     command = "{} -d --print-data > {}".format(SONIC_CFGGEN_PATH, filename)
     run_command(command, display_cmd=True)
 
-@cli.group()
+@config.group()
 @click.pass_context
 def check(ctx):
     "Verifies input configuration validity"
@@ -886,7 +886,7 @@ if routing_stack == "quagga":
     # 'bgp' group
     #
 
-    @cli.group()
+    @config.group()
     def bgp():
         """BGP-related configuration tasks"""
         pass
@@ -941,7 +941,7 @@ if routing_stack == "quagga":
 
 elif routing_stack == "frr":
     from frr_config_bgp import bgp
-    cli.add_command(bgp)
+    config.add_command(bgp)
 #
 # 'bgp' group ('config bgp ...')
 #

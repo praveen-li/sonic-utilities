@@ -64,7 +64,7 @@ def _frr_change_bgp_session_status(ipaddr, status, verbose):
 #
 # 'bgp' group
 #
-@cli.group()
+@config.group()
 def bgp():
     """BGP-related configuration tasks"""
     pass

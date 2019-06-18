@@ -301,21 +301,21 @@ class IntfStatus(object):
         for i in appl_db_keys:
             key = re.split(':', i, maxsplit=1)[-1].strip()
             if key in front_panel_ports_list:
-                db_flap = long(db_port_status_get(self.db, key, PORT_FLAP_COUNTER))
+                db_flap = long(appl_db_port_status_get(self.appl_db, key, PORT_FLAP_COUNTER))
                 cache_flap = long(cnstat_cached_dict[key].flap_counter)
                 final_flap = str(db_flap - cache_flap)
                 table.append((key,
-                              db_port_status_get(self.db, key, PORT_ADMIN_STATUS),
-                              db_port_status_get(self.db, key, PORT_OPER_STATUS),
-                              db_port_status_get(self.db, key, PORT_ALIAS),
-                              db_port_status_get(self.db, key, PORT_LANES_STATUS),
-                              db_port_status_get(self.db, key, PORT_SPEED),
-                              db_port_status_get(self.db, key, PORT_MTU_STATUS),
+                              appl_db_port_status_get(self.appl_db, key, PORT_ADMIN_STATUS),
+                              appl_db_port_status_get(self.appl_db, key, PORT_OPER_STATUS),
+                              appl_db_port_status_get(self.appl_db, key, PORT_ALIAS),
+                              appl_db_port_status_get(self.appl_db, key, PORT_LANES_STATUS),
+                              appl_db_port_status_get(self.appl_db, key, PORT_SPEED),
+                              appl_db_port_status_get(self.appl_db, key, PORT_MTU_STATUS),
                               config_db_vlan_port_keys_get(self.combined_int_to_vlan_po_dict, self.front_panel_ports_list, key),
                               state_db_port_optics_get(self.state_db, key, PORT_OPTICS_TYPE),
-                              appl_db_port_status_get(self.appl_db, key, PORT_PFC_ASYM_STATUS))),
+                              appl_db_port_status_get(self.appl_db, key, PORT_PFC_ASYM_STATUS),
                               final_flap,
-                              db_port_status_get(self.db, key, PORT_LAST_FLAP_TIME)))
+                              appl_db_port_status_get(self.appl_db, key, PORT_LAST_FLAP_TIME)))
 
         # Sorting and tabulating the result table.
         for po, value in portchannel_speed_dict.iteritems():
