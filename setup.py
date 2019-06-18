@@ -84,7 +84,7 @@ setup(
         'scripts/teamshow',
         'scripts/config-hwsku.sh',
         'scripts/portstat.py',
-	'scripts/syslog_helper.py'
+	'scripts/syslog_helper.py',
         'scripts/nbrshow',
         'scripts/warm-reboot',
         'scripts/watermarkstat',
