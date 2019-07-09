@@ -1324,6 +1324,29 @@ def all(verbose):
     run_command(cmd, display_cmd=verbose)
 
 
+# 'acl' subcommand ("show runningconfiguration acl")
+@runningconfiguration.command()
+@click.option('--verbose', is_flag=True, help="Enable verbose output")
+def acl(verbose):
+    """Show acl running configuration"""
+    cmd = "sonic-cfggen -d --var-json ACL_RULE"
+    run_command(cmd, display_cmd=verbose)
+
+
+# 'interface' subcommand ("show runningconfiguration interface <interfacename>")
+@runningconfiguration.command()
+@click.argument('interfacename', required=False)
+@click.option('--verbose', is_flag=True, help="Enable verbose output")
+def interface(interfacename, verbose):
+    """Show port running configuration"""
+    cmd = "sonic-cfggen -d --var-json PORT"
+
+    if interfacename is not None:
+        cmd += " {0} {1}".format("--interface", interfacename)
+
+    run_command(cmd, display_cmd=verbose)
+
+
 # 'bgp' subcommand ("show runningconfiguration bgp")
 @runningconfiguration.command()
 @click.option('--verbose', is_flag=True, help="Enable verbose output")
@@ -1642,6 +1665,22 @@ def mirror_session(session_name, verbose):
 
     if session_name is not None:
         cmd += " {}".format(session_name)
+
+    run_command(cmd, display_cmd=verbose)
+
+
+#
+# 'policer' command  ("show policer ...")
+#
+@cli.command()
+@click.argument('policer_name', required=False)
+@click.option('--verbose', is_flag=True, help="Enable verbose output")
+def policer(policer_name, verbose):
+    """Show existing policers"""
+    cmd = "acl-loader show policer"
+
+    if policer_name is not None:
+        cmd += " {}".format(policer_name)
 
     run_command(cmd, display_cmd=verbose)
 

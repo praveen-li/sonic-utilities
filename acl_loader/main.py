@@ -49,6 +49,7 @@ class AclLoader(object):
     ACL_TABLE_TYPE_MIRROR = "MIRROR"
     ACL_TABLE_TYPE_CTRLPLANE = "CTRLPLANE"
     MIRROR_SESSION = "MIRROR_SESSION"
+    POLICER = "POLICER"
     SESSION_PREFIX = "everflow"
 
     min_priority = 1
@@ -92,10 +93,11 @@ class AclLoader(object):
         self.read_tables_info()
         self.read_rules_info()
         self.read_sessions_info()
+        self.read_policers_info()
 
     def read_tables_info(self):
         """
-        Read ACL tables information from Config DB
+        Read ACL_TABLE table from configuration database
         :return:
         """
         self.tables_db_info = self.configdb.get_table(self.ACL_TABLE)
@@ -105,7 +107,7 @@ class AclLoader(object):
 
     def read_rules_info(self):
         """
-        Read rules information from Config DB
+        Read ACL_RULE table from configuration database
         :return:
         """
         self.rules_db_info = self.configdb.get_table(self.ACL_RULE)
@@ -113,9 +115,19 @@ class AclLoader(object):
     def get_rules_db_info(self):
         return self.rules_db_info
 
+    def read_policers_info(self):
+        """
+        Read POLICER table from configuration database
+        :return:
+        """
+        self.policers_db_info = self.configdb.get_table(self.POLICER)
+
+    def get_policers_db_info(self):
+        return self.policers_db_info
+
     def read_sessions_info(self):
         """
-        Read ACL tables information from Config DB
+        Read MIRROR_SESSION table from configuration database
         :return:
         """
         self.sessions_db_info = self.configdb.get_table(self.MIRROR_SESSION)
@@ -128,15 +140,11 @@ class AclLoader(object):
             self.sessions_db_info[key]["status"] = status
 
     def get_sessions_db_info(self):
-        """
-        Read mirror session information from Config DB
-        :return:
-        """
         return self.sessions_db_info
 
     def get_session_name(self):
         """
-        Read mirror session name from Config DB
+        Get requested mirror session name or default session
         :return: Mirror session name
         """
         if self.requested_session:
@@ -180,11 +188,11 @@ class AclLoader(object):
 
     def is_table_mirror(self, tname):
         """
-        Check if ACL table type is ACL_TABLE_TYPE_MIRROR
+        Check if ACL table type is ACL_TABLE_TYPE_MIRROR or ACL_TABLE_TYPE_MIRRORV6
         :param tname: ACL table name
-        :return: True if table type is ACL_TABLE_TYPE_MIRROR else False
+        :return: True if table type is MIRROR or MIRRORV6 else False
         """
-        return self.tables_db_info[tname]['type'].upper() == self.ACL_TABLE_TYPE_MIRROR
+        return self.tables_db_info[tname]['type'].upper().startswith(self.ACL_TABLE_TYPE_MIRROR)
 
     def is_table_control_plane(self, tname):
         """
@@ -532,7 +540,7 @@ class AclLoader(object):
         :param session_name: Optional. Mirror session name. Filter sessions by specified name.
         :return:
         """
-        header = ("Name", "Status", "SRC IP", "DST IP", "GRE", "DSCP", "TTL", "Queue")
+        header = ("Name", "Status", "SRC IP", "DST IP", "GRE", "DSCP", "TTL", "Queue", "Policer")
 
         data = []
         for key, val in self.get_sessions_db_info().iteritems():
@@ -541,9 +549,28 @@ class AclLoader(object):
 
             data.append([key, val["status"], val["src_ip"], val["dst_ip"],
                          val.get("gre_type", ""), val.get("dscp", ""),
-                         val.get("ttl", ""), val.get("queue", "")])
+                         val.get("ttl", ""), val.get("queue", ""), val.get("policer", "")])
 
         print(tabulate.tabulate(data, headers=header, tablefmt="simple", missingval=""))
+
+
+    def show_policer(self, policer_name):
+        """
+        Show policer configuration.
+        :param policer_name: Optional. Policer name. Filter policers by specified name.
+        :return:
+        """
+        header = ("Name", "Type", "Mode", "CIR", "CBS")
+
+        data = []
+        for key, val in self.get_policers_db_info().iteritems():
+            if policer_name and key != policer_name:
+                continue
+
+            data.append([key, val["meter_type"], val["mode"], val.get("cir", ""), val.get("cbs", "")])
+
+        print(tabulate.tabulate(data, headers=header, tablefmt="simple", missingval=""))
+
 
     def show_rule(self, table_name, rule_id):
         """
@@ -646,6 +673,18 @@ def session(ctx, session_name):
     """
     acl_loader = ctx.obj["acl_loader"]
     acl_loader.show_session(session_name)
+
+
+@show.command()
+@click.argument('policer_name', type=click.STRING, required=False)
+@click.pass_context
+def policer(ctx, policer_name):
+    """
+    Show policer configuration.
+    :return:
+    """
+    acl_loader = ctx.obj["acl_loader"]
+    acl_loader.show_policer(policer_name)
 
 
 @show.command()
