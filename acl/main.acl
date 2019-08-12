@@ -1,2 +1,3 @@
 owners: [ pchaudha, pmao, vapatil, samaity, zxu ]
 paths: [ '.*' ]
+exclude_paths: [ 'setup.py' ]
