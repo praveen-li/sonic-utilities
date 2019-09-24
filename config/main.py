@@ -516,6 +516,25 @@ def load_minigraph():
 
 
 #
+# 'change-hostname' command
+#
+@config.command('change-hostname')
+@click.argument('hostname', metavar='<hostname>', required=True)
+def change_hostname(hostname):
+    """Change Hostname on a SONiC device without impacting the traffic."""
+
+    config_db = ConfigDBConnector()
+    config_db.connect()
+    config_db.mod_entry('DEVICE_METADATA' , 'localhost', {"hostname" : hostname})
+    try:
+        command = "service hostname-config restart"
+        run_command(command, display_cmd=True)
+    except SystemExit as e:
+        click.echo("Restarting hostname-config  service failed with error {}".format(e))
+        raise
+    click.echo("Please note loaded setting will be lost after system reboot. To preserve setting, run `config save`.")
+
+#
 # 'portchannel' group ('config portchannel ...')
 #
 @config.group()
