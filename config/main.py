@@ -8,6 +8,7 @@ import subprocess
 import netaddr
 import re
 import syslog
+import yaml
 
 import sonic_device_util
 from swsssdk import ConfigDBConnector
@@ -22,6 +23,7 @@ CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help', '-?'])
 
 SONIC_CFGGEN_PATH = '/usr/local/bin/sonic-cfggen'
 SYSLOG_IDENTIFIER = "config"
+SNMP_COMMUNITY_FILE = '/etc/sonic/snmp.yml'
 
 # ========================== Syslog wrappers ==========================
 
@@ -728,6 +730,51 @@ def reload():
             click.secho('QoS definition template not found at {}'.format(qos_template_file), fg='yellow')
     else:
         click.secho('Buffer definition template not found at {}'.format(buffer_template_file), fg='yellow')
+
+#
+# 'snmp-community' command
+#
+@config.command('snmp-community')
+@click.argument('community-name', metavar='<community_name>', required=True)
+def snmp_community(community_name):
+    """Add SNMP community string"""
+
+    """Serialization of a Python dict from a SNMP YAML File """
+    with open(SNMP_COMMUNITY_FILE, 'r') as stream:
+        try:
+            snmp_community_dict = yaml.safe_load(stream)
+        except yaml.YAMLError as error:
+            click.echo("SNMP config file not loaded correctly with error {}".format(error))
+            raise
+
+    if 'snmp_rocommunity' in snmp_community_dict.keys():
+        if 'snmp_rocommunities' not in snmp_community_dict.keys():
+            existing_community_name = snmp_community_dict['snmp_rocommunity']
+            snmp_community_dict['snmp_rocommunities'] = [existing_community_name]
+        snmp_community_dict['snmp_rocommunities'].append(community_name)
+    else:
+        snmp_community_dict['snmp_rocommunity'] = community_name
+        if 'snmp_rocommunities' not in snmp_community_dict.keys():
+            snmp_community_dict['snmp_rocommunities'] = [community_name]
+        else:
+            snmp_community_dict['snmp_rocommunities'].append(community_name)
+
+    """Serialization of a Python dict into a SNMP YAML File"""
+    with open(SNMP_COMMUNITY_FILE, 'w') as yaml_file:
+        try:
+            yaml.safe_dump(snmp_community_dict, yaml_file, default_flow_style=False)
+        except yaml.YAMLError as error:
+            click.echo("SNMP config data not dumped properly with error {}",format(error))
+            raise
+
+    """Restart SNMP Service"""
+    try:
+        click.echo("Restarting SNMP service...")
+        command = 'service snmp restart'
+        run_command(command, display_cmd=False)
+    except SystemExit as error:
+        click.echo("Restart service SNMP failed with error {}".format(error))
+        raise
 
 #
 # 'warm_restart' group ('config warm_restart ...')
