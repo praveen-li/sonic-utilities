@@ -25,7 +25,7 @@ def get_test_suite():
 
 setup(
     name='sonic-utilities',
-    version='2.0.0',
+    version='2.0.1',
     description='Command-line utilities for SONiC',
     license='Apache 2.0',
     author='SONiC Team',
