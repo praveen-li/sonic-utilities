@@ -14,7 +14,7 @@ from click_default_group import DefaultGroup
 from natsort import natsorted
 from tabulate import tabulate
 
-import sonic_platform
+import sonic_device_util
 from swsssdk import ConfigDBConnector
 from sonic_platform import get_system_routing_stack
 from swsssdk import SonicV2Connector
@@ -59,8 +59,8 @@ class InterfaceAliasConverter(object):
         self.port_dict = config_db.get_table('PORT')
 
         if not self.port_dict:
-            click.echo("port_dict is None!")
-            raise click.Abort()
+            click.echo(message="Warning: failed to retrieve PORT table from ConfigDB!", err=True)
+            self.port_dict = {}
 
         for port_name in self.port_dict.keys():
             try:
@@ -292,6 +292,7 @@ def run_command_in_alias_mode(command):
                 elif output[0].isdigit():
                     output = "    " + output
                 print_output_in_alias_mode(output, index)
+
             elif command.startswith("nbrshow"):
                 """show arp"""
                 index = 2
@@ -299,19 +300,33 @@ def run_command_in_alias_mode(command):
                     output = output.replace('Vlan', '  Vlan')
                 print_output_in_alias_mode(output, index)
 
+            elif command.startswith("sudo teamshow"):
+                """
+                sudo teamshow
+                Search for port names either at the start of a line or preceded immediately by
+                whitespace and followed immediately by either the end of a line or whitespace
+                OR followed immediately by '(D)', '(S)', '(D*)' or '(S*)'
+                """
+                converted_output = raw_output
+                for port_name in iface_alias_converter.port_dict.keys():
+                    converted_output = re.sub(r"(^|\s){}(\([DS]\*{{0,1}}\)(?:$|\s))".format(port_name),
+                            r"\1{}\2".format(iface_alias_converter.name_to_alias(port_name)),
+                            converted_output)
+                click.echo(converted_output.rstrip('\n'))
+
             else:
-                if index:
-                    for port_name in iface_alias_converter.port_dict.keys():
-                        regex = re.compile(r"\b{}\b".format(port_name))
-                        result = re.findall(regex, raw_output)
-                        if result:
-                            interface_name = ''.join(result)
-                            if not raw_output.startswith("    PortID:"):
-                                raw_output = raw_output.replace(
-                                    interface_name,
-                                    iface_alias_converter.name_to_alias(
-                                            interface_name))
-                    click.echo(raw_output.rstrip('\n'))
+                """
+                Default command conversion
+                Search for port names either at the start of a line or preceded immediately by
+                whitespace and followed immediately by either the end of a line or whitespace
+                or a comma followed by whitespace
+                """
+                converted_output = raw_output
+                for port_name in iface_alias_converter.port_dict.keys():
+                    converted_output = re.sub(r"(^|\s){}($|,{{0,1}}\s)".format(port_name),
+                            r"\1{}\2".format(iface_alias_converter.name_to_alias(port_name)),
+                            converted_output)
+                click.echo(converted_output.rstrip('\n'))
 
     rc = process.poll()
     if rc != 0:
@@ -397,6 +412,32 @@ def alias(interfacename):
 
     port_dict = json.loads(p.stdout.read())
 
+    header = ['Name', 'Alias']
+    body = []
+
+    if interfacename is not None:
+        if get_interface_mode() == "alias":
+            interfacename = iface_alias_converter.alias_to_name(interfacename)
+
+        # If we're given an interface name, output name and alias for that interface only
+        if interfacename in port_dict:
+            if 'alias' in port_dict[interfacename]:
+                body.append([interfacename, port_dict[interfacename]['alias']])
+            else:
+                body.append([interfacename, interfacename])
+        else:
+            click.echo("Invalid interface name, '{0}'".format(interfacename))
+            return
+    else:
+        # Output name and alias for all interfaces
+        for port_name in natsorted(port_dict.keys()):
+            if 'alias' in port_dict[port_name]:
+                body.append([port_name, port_dict[port_name]['alias']])
+            else:
+                body.append([port_name, port_name])
+
+    click.echo(tabulate(body, header))
+
 #
 # 'neighbor' group ###
 #
@@ -449,6 +490,7 @@ def expected(interfacename):
 
     click.echo(tabulate(body, header))
 
+<<<<<<< HEAD
 
 # 'summary' subcommand ("show interfaces summary")
 @interfaces.command()
@@ -465,6 +507,8 @@ def summary(interfacename, verbose):
     run_command(cmd, display_cmd=verbose)
 
 
+=======
+>>>>>>> github-201811
 @interfaces.group(cls=AliasedGroup, default_if_no_args=False)
 def transceiver():
     """Show SFP Transceiver information"""
@@ -1086,8 +1130,8 @@ def get_hw_info_dict():
     This function is used to get the HW info helper function  
     """
     hw_info_dict = {}
-    machine_info = sonic_platform.get_machine_info()
-    platform = sonic_platform.get_platform_info(machine_info)
+    machine_info = sonic_device_util.get_machine_info()
+    platform = sonic_device_util.get_platform_info(machine_info)
     config_db = ConfigDBConnector()
     config_db.connect()
     data = config_db.get_table('DEVICE_METADATA')
@@ -1095,7 +1139,7 @@ def get_hw_info_dict():
         hwsku = data['localhost']['hwsku']
     except KeyError:
         hwsku = "Unknown"
-    version_info = sonic_platform.get_sonic_version_info()
+    version_info = sonic_device_util.get_sonic_version_info()
     asic_type = version_info['asic_type']
     hw_info_dict['platform'] = platform
     hw_info_dict['hwsku'] = hwsku
@@ -1107,7 +1151,7 @@ def platform():
     """Show platform-specific hardware info"""
     pass
 
-version_info = sonic_platform.get_sonic_version_info()
+version_info = sonic_device_util.get_sonic_version_info()
 if (version_info and version_info.get('asic_type') == 'mellanox'):
     platform.add_command(mlnx.mlnx)
 
@@ -1178,7 +1222,7 @@ def logging(process, lines, follow, verbose):
 @click.option("--verbose", is_flag=True, help="Enable verbose output")
 def version(verbose):
     """Show version information"""
-    version_info = sonic_platform.get_sonic_version_info()
+    version_info = sonic_device_util.get_sonic_version_info()
     hw_info_dict = get_hw_info_dict()
     serial_number_cmd = "sudo decode-syseeprom -s"
     serial_number = subprocess.Popen(serial_number_cmd, shell=True, stdout=subprocess.PIPE)    

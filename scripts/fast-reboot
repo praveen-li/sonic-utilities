@@ -9,6 +9,7 @@ REBOOT_SCRIPT_NAME=$(basename $0)
 REBOOT_TYPE="${REBOOT_SCRIPT_NAME}"
 VERBOSE=no
 FORCE=no
+STRICT=no
 REBOOT_METHOD="/sbin/kexec -e"
 ASSISTANT_IP_LIST=""
 ASSISTANT_SCRIPT="/usr/bin/neighbor_advertiser"
@@ -25,6 +26,7 @@ EXIT_NEXT_IMAGE_NOT_EXISTS=4
 EXIT_ORCHAGENT_SHUTDOWN=10
 EXIT_SYNCD_SHUTDOWN=11
 EXIT_FAST_REBOOT_DUMP_FAILURE=12
+EXIT_NO_CONTROL_PLANE_ASSISTANT=20
 
 function error()
 {
@@ -49,13 +51,15 @@ function showHelpAndExit()
     echo "    -k    : reboot with /sbin/kexec -e [default]"
     echo "    -x    : execute script with -x flag"
     echo "    -c    : specify control plane assistant IP list"
+    echo "    -s    : strict mode: do not proceed without:"
+    echo "            - control plane assistant IP list."
 
     exit "${EXIT_SUCCESS}"
 }
 
 function parseOptions()
 {
-    while getopts "vfh?rkxc:" opt; do
+    while getopts "vfh?rkxc:s" opt; do
         case ${opt} in
             h|\? )
                 showHelpAndExit
@@ -77,6 +81,9 @@ function parseOptions()
                 ;;
             c )
                 ASSISTANT_IP_LIST=${OPTARG}
+                ;;
+            s )
+                STRICT=yes
                 ;;
         esac
     done
@@ -180,10 +187,11 @@ function backup_database()
     debug "Backing up database ..."
     # Dump redis content to a file 'dump.rdb' in warmboot directory
     mkdir -p $WARM_DIR
-    # Delete keys in stateDB except FDB_TABLE|* and WARM_RESTA*
+    # Delete keys in stateDB except FDB_TABLE|*, MIRROR_SESSION_TABLE|*, WARM_RESTART_ENABLE_TABLE|*
     redis-cli -n 6 eval "
         for _, k in ipairs(redis.call('keys', '*')) do
             if not string.match(k, 'FDB_TABLE|') and not string.match(k, 'WARM_RESTART_TABLE|') \
+                                          and not string.match(k, 'MIRROR_SESSION_TABLE|') \
                                           and not string.match(k, 'WARM_RESTART_ENABLE_TABLE|') then
                 redis.call('del', k)
             end
@@ -199,6 +207,9 @@ function setup_control_plane_assistant()
     if [[ -n "${ASSISTANT_IP_LIST}" && -x ${ASSISTANT_SCRIPT} ]]; then
         debug "Setting up control plane assistant: ${ASSISTANT_IP_LIST} ..."
         ${ASSISTANT_SCRIPT} -s ${ASSISTANT_IP_LIST} -m set
+    elif [[ X"${STRICT}" == X"yes" ]]; then
+        debug "Strict mode: fail due to lack of control plane assistant ..."
+        exit ${EXIT_NO_CONTROL_PLANE_ASSISTANT}
     fi
 }
 
@@ -249,6 +260,23 @@ function reboot_pre_check()
     if [[ ! -d ${IMAGE_PATH} ]]; then
         debug "Next image ${NEXT_SONIC_IMAGE} doesn't exist ..."
         exit ${EXIT_NEXT_IMAGE_NOT_EXISTS}
+    fi
+    
+    # Make sure ASIC configuration has not changed between images
+    ASIC_CONFIG_CHECK_SCRIPT="/usr/bin/asic_config_check"
+    ASIC_CONFIG_CHECK_SUCCESS=0
+    if [[ "$REBOOT_TYPE" = "warm-reboot" || "$REBOOT_TYPE" = "fastfast-reboot" ]]; then
+        ASIC_CONFIG_CHECK_EXIT_CODE=0
+        ${ASIC_CONFIG_CHECK_SCRIPT} || ASIC_CONFIG_CHECK_EXIT_CODE=$?
+
+        if [[ "${ASIC_CONFIG_CHECK_EXIT_CODE}" != "${ASIC_CONFIG_CHECK_SUCCESS}" ]]; then
+            if [[ x"${FORCE}" == x"yes" ]]; then
+                debug "Ignoring ASIC config checksum failure..."
+            else
+                error "ASIC config may have changed: errno=${ASIC_CONFIG_CHECK_EXIT_CODE}"
+                exit "${EXIT_FAILURE}"
+            fi
+        fi
     fi
 }
 
@@ -368,24 +396,46 @@ if [[ "$REBOOT_TYPE" = "warm-reboot" || "$REBOOT_TYPE" = "fastfast-reboot" ]]; t
     fi
 fi
 
+# Kill radv before stopping BGP service to prevent annoucing our departure.
+debug "Stopping radv ..."
+docker kill radv &>/dev/null || [ $? == 1 ]
+systemctl stop radv
+
 # Kill bgpd to start the bgp graceful restart procedure
 debug "Stopping bgp ..."
 docker exec -i bgp pkill -9 zebra
 docker exec -i bgp pkill -9 bgpd || [ $? == 1 ]
 debug "Stopped  bgp ..."
 
-# Kill lldp, otherwise it sends informotion about reboot
+# Kill lldp, otherwise it sends informotion about reboot.
+# We call `docker kill lldp` to ensure the container stops as quickly as possible,
+# then immediately call `systemctl stop lldp` to prevent the service from
+# restarting the container automatically.
 docker kill lldp > /dev/null
+systemctl stop lldp
 
 if [[ "$REBOOT_TYPE" = "fast-reboot" ]]; then
-    # Kill teamd, otherwise it gets down all LAGs
+    # Kill teamd processes inside of teamd container with SIGUSR2 to allow them to send last LACP frames
+    # We call `docker kill teamd` to ensure the container stops as quickly as possible,
+    # then immediately call `systemctl stop teamd` to prevent the service from
+    # restarting the container automatically.
     # Note: teamd must be killed before syncd, because it will send the last packet through CPU port
-    # TODO: stop teamd gracefully to allow teamd to send last valid update to be sure we'll have 90 seconds reboot time
+    debug "Stopping teamd ..."
+    docker exec -i teamd pkill -USR2 teamd || [ $? == 1 ]
+    while docker exec -i teamd pgrep teamd > /dev/null; do
+      sleep 0.05
+    done
     docker kill teamd > /dev/null
+    systemctl stop teamd
+    debug "Stopped teamd ..."
 fi
 
-# Kill swss dockers
+# Kill swss Docker container
+# We call `docker kill swss` to ensure the container stops as quickly as possible,
+# then immediately call `systemctl stop swss` to prevent the service from
+# restarting the container automatically.
 docker kill swss > /dev/null
+systemctl stop swss
 
 # Pre-shutdown syncd
 if [[ "$REBOOT_TYPE" = "warm-reboot" || "$REBOOT_TYPE" = "fastfast-reboot" ]]; then
@@ -413,7 +463,7 @@ if [[ "$REBOOT_TYPE" = "warm-reboot" || "$REBOOT_TYPE" = "fastfast-reboot" ]]; t
     # Send USR1 signal to all teamd instances to stop them
     # It will prepare teamd for warm-reboot
     # Note: We must send USR1 signal before syncd, because it will send the last packet through CPU port
-    docker exec -i teamd pkill -USR1 teamd || [ $? == 1 ] > /dev/null
+    docker exec -i teamd pkill -USR1 teamd > /dev/null || [ $? == 1 ]
     debug "Stopped  teamd ..."
 fi
 
@@ -422,19 +472,22 @@ systemctl stop syncd
 debug "Stopped  syncd ..."
 
 # Kill other containers to make the reboot faster
-docker ps -q | xargs docker kill > /dev/null
+# We call `docker kill ...` to ensure the container stops as quickly as possible,
+# then immediately call `systemctl stop ...` to prevent the service from
+# restarting the container automatically.
+debug "Stopping all remaining containers ..."
+for CONTAINER_NAME in $(docker ps --format '{{.Names}}'); do
+    CONTAINER_STOP_RC=0
+    docker kill $CONTAINER_NAME &> /dev/null || CONTAINER_STOP_RC=$?
+    systemctl stop $CONTAINER_NAME
+    if [[ CONTAINER_STOP_RC -ne 0 ]]; then
+        debug "Failed killing container $CONTAINER_NAME RC $CONTAINER_STOP_RC ."
+    fi
+done
+debug "Stopped all remaining containers ..."
 
 # Stop the docker container engine. Otherwise we will have a broken docker storage
 systemctl stop docker.service
-
-if [[ "$REBOOT_TYPE" != "warm-reboot" ]]; then
-    # Stop opennsl modules for Broadcom platform
-    if [[ "$sonic_asic_type" = 'broadcom' ]];
-    then
-      service_name=$(systemctl list-units --plain --no-pager --no-legend --type=service | grep opennsl | cut -f 1 -d' ')
-      systemctl stop "$service_name"
-    fi
-fi
 
 # Stop kernel modules for Nephos platform
 if [[ "$sonic_asic_type" = 'nephos' ]];

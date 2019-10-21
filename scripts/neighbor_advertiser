@@ -14,9 +14,11 @@ import requests
 import argparse
 import syslog
 import traceback
-import sonic_platform
+import subprocess
+import sonic_device_util
 from swsssdk import ConfigDBConnector
 from swsssdk import SonicV2Connector
+from netaddr import IPAddress, IPNetwork
 
 
 #
@@ -25,6 +27,7 @@ from swsssdk import SonicV2Connector
 
 DEFAULT_DURATION = 300
 DEFAULT_REQUEST_TIMEOUT = 2
+DEFAULT_FERRET_QUERY_RETRIES = 3
 SYSLOG_IDENTIFIER = 'neighbor_advertiser'
 
 
@@ -33,8 +36,11 @@ SYSLOG_IDENTIFIER = 'neighbor_advertiser'
 #
 
 MIRROR_SESSION_NAME = 'neighbor_advertiser'
-MIRROR_ACL_NAME = 'neighbor_advertiser_acl'
+MIRROR_ACL_TABLE_PREFIX = 'SONIC_'
+MIRROR_ACL_TABLE_NAME = 'EVERFLOW'
+MIRROR_ACL_TABLEV6_NAME = 'EVERFLOWV6'
 MIRROR_ACL_RULE_NAME = 'rule_arp'
+MIRROR_ACL_RULEV6_NAME = 'rule_nd'
 VXLAN_TUNNEL_NAME = 'neighbor_advertiser'
 VXLAN_TUNNEL_MAP_PREFIX = 'map_'
 
@@ -79,15 +85,48 @@ def log_error(msg):
 config_db = None
 
 
-#
-# Get switch info and intf addr
-#
-
 def connect_config_db():
     global config_db
     config_db = ConfigDBConnector()
     config_db.connect()
 
+
+#
+# Check if a DIP returned from ferret is in any of this switch's VLANs
+#
+
+vlan_interface_query = None
+
+
+def is_dip_in_device_vlan(ferret_dip):
+    global vlan_interface_query
+
+    # Lazy load the vlan interfaces the first time we run this check.
+    if not vlan_interface_query:
+        vlan_interface_query = config_db.get_table('VLAN_INTERFACE')
+
+    ferret_dip = IPAddress(ferret_dip)
+
+    for vlan_interface in vlan_interface_query.iterkeys():
+        if not is_ip_prefix_in_key(vlan_interface):
+            log_info('{} does not have a subnet, skipping...'.format(vlan_interface))
+            continue
+
+        vlan_subnet = IPNetwork(vlan_interface[1])
+
+        if ferret_dip.version != vlan_subnet.version:
+            log_info('{} version (IPv{}) does not match provided DIP version (IPv{}), skipping...'.format(vlan_interface[0], vlan_subnet.version, ferret_dip.version))
+            continue
+
+        if ferret_dip in vlan_subnet:
+            return True
+
+    return False
+
+
+#
+# Get switch info and intf addr
+#
 
 def get_switch_name():
     metadata = config_db.get_table('DEVICE_METADATA')
@@ -110,11 +149,22 @@ def extract_ip_ver_addr(ip_prefix):
     return (ver, addr)
 
 
+def is_ip_prefix_in_key(key):
+    '''
+    Function to check if IP address is present in the key. If it
+    is present, then the key would be a tuple or else, it shall be
+    be string
+    '''
+    return (isinstance(key, tuple))
+
+
 def get_loopback_addr(ip_ver):
     loopback_intfs = config_db.get_table('LOOPBACK_INTERFACE')
     loopback_addr = ''
 
     for intf in loopback_intfs.keys():
+        if not is_ip_prefix_in_key(intf):
+             continue
         if 'Loopback0' in intf:
             intf_ip_prefix = intf[1]
             (intf_ip_ver, intf_ip_addr) = extract_ip_ver_addr(intf_ip_prefix)
@@ -170,6 +220,8 @@ def get_vlan_addr(vlan_intf_name, ip_ver):
     vlan_addr = []
 
     for intf in vlan_intfs.keys():
+        if not is_ip_prefix_in_key(intf):
+             continue
         if vlan_intf_name in intf:
             intf_ip_prefix = intf[1]
             (intf_ip_ver, intf_ip_addr) = extract_ip_ver_addr(intf_ip_prefix)
@@ -178,6 +230,51 @@ def get_vlan_addr(vlan_intf_name, ip_ver):
 
     return vlan_addr
 
+
+def get_vlan_addresses(vlan_interface):
+    vlan_id = get_vlan_interface_vlan_id(vlan_interface)
+    vxlan_id = get_vlan_interface_vxlan_id(vlan_interface)
+
+    mac_addr = None
+    ipv4_addr = []
+    ipv6_addr = []
+
+    '''
+    Sample output for "ip addr show Vlan101"
+
+	218: Vlan101@Bridge: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+		link/ether 98:5d:82:01:d8:48 brd ff:ff:ff:ff:ff:ff
+		inet 10.171.22.113/29 scope global Vlan101
+		   valid_lft forever preferred_lft forever
+		inet6 2603:10b0:10f:843c::1/64 scope global
+		   valid_lft forever preferred_lft forever
+		inet6 fe80::9a5d:82ff:fe01:d848/64 scope link
+		   valid_lft forever preferred_lft forever
+    '''
+    try:
+        out = subprocess.check_output(['ip', 'addr', 'show', vlan_interface])
+        for line in out.splitlines():
+            keys=line.strip().split(' ')
+            if keys[0] == 'inet':
+                ipv4_addr.append(keys[1].split('/')[0])
+            elif keys[0] == 'inet6':
+                ipv6_addr.append(keys[1].split('/')[0])
+            elif keys[0] == 'link/ether':
+                mac_addr = keys[1]
+    except Exception as e:
+        log_error('failed to get %s addresses from o.s.' % vlan_interface)
+        pass
+
+    if not mac_addr:
+        mac_addr = get_vlan_interface_mac_address(vlan_interface)
+
+    if not ipv4_addr:
+        ipv4_addr = get_vlan_addr(vlan_interface, 4)
+
+    if not ipv6_addr:
+        ipv6_addr = get_vlan_addr(vlan_interface, 6)
+
+    return vlan_id, vxlan_id, ipv4_addr, ipv6_addr, mac_addr
 
 #
 # Set up neighbor advertiser slice on Ferret
@@ -200,11 +297,7 @@ def construct_neighbor_advertiser_slice():
     all_vlan_interfaces = get_vlan_interfaces()
 
     for vlan_interface in all_vlan_interfaces:
-        vlan_id = get_vlan_interface_vlan_id(vlan_interface)
-        vxlan_id = get_vlan_interface_vxlan_id(vlan_interface)
-        ipv4_addr = get_vlan_addr(vlan_interface, 4)
-        ipv6_addr = get_vlan_addr(vlan_interface, 6)
-        mac_addr = get_vlan_interface_mac_address(vlan_interface)
+        vlan_id, vxlan_id, ipv4_addr, ipv6_addr, mac_addr = get_vlan_addresses(vlan_interface)
 
         if not mac_addr:
             log_warning('Cannot find mac addr of vlan interface {}'.format(vlan_interface))
@@ -251,24 +344,36 @@ def post_neighbor_advertiser_slice(ferret_service_vip):
     url = 'http://{}:85{}{}'.format(ferret_service_vip, FERRET_NEIGHBOR_ADVERTISER_API_PREFIX, get_switch_name())
     response = None
 
-    try:
-        response = requests.post(url, json = request_slice, timeout = DEFAULT_REQUEST_TIMEOUT)
-    except Exception as e:
-        log_error('The request failed, vip: {}, error: {}'.format(ferret_service_vip, e))
+    for retry in range(DEFAULT_FERRET_QUERY_RETRIES):
+        try:
+            response = requests.post(url, json = request_slice, timeout = DEFAULT_REQUEST_TIMEOUT)
+        except Exception as e:
+            log_error('The request failed, vip: {}, error: {}'.format(ferret_service_vip, e))
+            return None
 
-    ferret_server_ipv4_addr = None
+        # Handle response errors
+        if not response:
+            log_error('Failed to set up neighbor advertiser slice, vip: {}, no response obtained'.format(ferret_service_vip))
+            return None
+        if response and not response.ok:
+            log_error('Failed to set up neighbor advertiser slice, vip: {}, error_code: {}, error_content: {}'.format(ferret_service_vip, response.status_code, response.content))
+            return None
 
-    if response and response.ok:
         neighbor_advertiser_configuration = json.loads(response.content)
-        save_as_json(neighbor_advertiser_configuration, NEIGHBOR_ADVERTISER_RESPONSE_CONFIG_PATH)
         ferret_server_ipv4_addr = neighbor_advertiser_configuration['ipv4Addr']
-        log_info('Successfully set up neighbor advertiser slice, vip: {}, dip: {}'.format(ferret_service_vip, ferret_server_ipv4_addr))
-    elif response:
-        log_error('Failed to set up neighbor advertiser slice, vip: {}, error_code: {}, error_content: {}'.format(ferret_service_vip, response.status_code, response.content))
-    else:
-        log_error('Failed to set up neighbor advertiser slice, vip: {}, no response obtained'.format(ferret_service_vip))
 
-    return ferret_server_ipv4_addr
+        # Retry the request if the provided DIP is in the device VLAN
+        if is_dip_in_device_vlan(ferret_server_ipv4_addr):
+            log_info('Failed to set up neighbor advertiser slice, vip: {}, dip {} is in device VLAN (attempt {}/{})'.format(ferret_service_vip, ferret_server_ipv4_addr, retry + 1, DEFAULT_FERRET_QUERY_RETRIES))
+            continue
+
+        # If all the proceeding checks pass, return the provided DIP
+        save_as_json(neighbor_advertiser_configuration, NEIGHBOR_ADVERTISER_RESPONSE_CONFIG_PATH)
+        log_info('Successfully set up neighbor advertiser slice, vip: {}, dip: {}'.format(ferret_service_vip, ferret_server_ipv4_addr))
+        return ferret_server_ipv4_addr
+
+    log_error('Failed to set up neighbor advertiser slice, vip: {}, returned dips were in device VLAN'.format(ferret_service_vip))
+    return None
 
 
 def save_as_json(obj, file_path):
@@ -280,9 +385,29 @@ def save_as_json(obj, file_path):
         json.dump(obj, outfile, sort_keys = True)
 
 
+# This function tries to find the corresponding names of the mirror v4 and v6 table
+# Right now, the name could be EVERFLOW/EVERFLOWv6 or SONIC_EVERFLOW/SONIC_EVERFLOWV6
+def find_mirror_table_name():
+    acl_tables = config_db.get_keys("ACL_TABLE")
+    v4_table, v6_table = "", ""
+    for table in acl_tables:
+        if MIRROR_ACL_TABLE_NAME == table or \
+                MIRROR_ACL_TABLE_PREFIX + MIRROR_ACL_TABLE_NAME == table:
+            v4_table = table
+        if MIRROR_ACL_TABLEV6_NAME == table or \
+                MIRROR_ACL_TABLE_PREFIX + MIRROR_ACL_TABLEV6_NAME == table:
+            v6_table = table
+    if not v4_table:
+        log_error(MIRROR_ACL_TABLE_NAME + " table does not exist")
+    if not v6_table:
+        log_error(MIRROR_ACL_TABLEV6_NAME + " table does not exist")
+    return (v4_table, v6_table)
+
+
 #
 # Set mirror tunnel
 #
+
 
 def add_mirror_session(dst_ipv4_addr):
     session_info = {
@@ -293,32 +418,30 @@ def add_mirror_session(dst_ipv4_addr):
     config_db.set_entry('MIRROR_SESSION', MIRROR_SESSION_NAME, session_info)
 
 
-def add_mirror_acl():
-    all_vlan_ports = []
-    for vlan_intf in get_vlan_interfaces():
-        all_vlan_ports.extend(get_vlan_interface_members(vlan_intf))
-
-    acl_info = {
-        'policy_desc': 'neighbor advertiser',
-        'type': 'mirror',
-        'ports': all_vlan_ports
-    }
-
-    config_db.set_entry('ACL_TABLE', MIRROR_ACL_NAME, acl_info)
-
-
 def add_mirror_acl_rule():
-    acl_rule_info = {
-        'ether_type': '2054',
-        'mirror_action': MIRROR_SESSION_NAME
-    }
+    (v4_table, v6_table) = find_mirror_table_name()
 
-    config_db.set_entry('ACL_RULE', (MIRROR_ACL_NAME, MIRROR_ACL_RULE_NAME), acl_rule_info)
+    if v4_table:
+        acl_rule_info = {
+            'PRIORITY': '8888',
+            'ether_type': '2054',
+            'mirror_action': MIRROR_SESSION_NAME
+        }
+        config_db.set_entry('ACL_RULE',
+                (v4_table, MIRROR_ACL_RULE_NAME), acl_rule_info)
+
+    if v6_table:
+        acl_rule_info = {
+            'PRIORITY': '8887',
+            'ICMPV6_TYPE': '135',
+            'mirror_action': MIRROR_SESSION_NAME
+        }
+        config_db.set_entry('ACL_RULE',
+                (v6_table, MIRROR_ACL_RULEV6_NAME), acl_rule_info)
 
 
 def set_mirror_tunnel(ferret_server_ip):
     add_mirror_session(ferret_server_ip)
-    add_mirror_acl()
     add_mirror_acl_rule()
     log_info('Finish setting mirror tunnel; Ferret: {}'.format(ferret_server_ip))
 
@@ -331,17 +454,18 @@ def remove_mirror_session():
     config_db.set_entry('MIRROR_SESSION', MIRROR_SESSION_NAME, None)
 
 
-def remove_mirror_acl():
-    config_db.set_entry('ACL_TABLE', MIRROR_ACL_NAME, None)
-
-
 def remove_mirror_acl_rule():
-    config_db.set_entry('ACL_RULE', (MIRROR_ACL_NAME, MIRROR_ACL_RULE_NAME), None)
+    (v4_table, v6_table) = find_mirror_table_name()
+
+    if v4_table:
+        config_db.set_entry('ACL_RULE', (v4_table, MIRROR_ACL_RULE_NAME), None)
+
+    if v6_table:
+        config_db.set_entry('ACL_RULE', (v6_table, MIRROR_ACL_RULEV6_NAME), None)
 
 
 def reset_mirror_tunnel():
     remove_mirror_acl_rule()
-    remove_mirror_acl()
     remove_mirror_session()
     log_info('Finish resetting mirror tunnel')
 
@@ -363,7 +487,7 @@ def add_vxlan_tunnel_map():
     for (index, vlan_intf_name) in enumerate(get_vlan_interfaces(), 1):
         vxlan_tunnel_map_info = {
             'vni': get_vlan_interface_vxlan_id(vlan_intf_name),
-            'vlan': get_vlan_interface_vlan_id(vlan_intf_name)
+            'vlan': vlan_intf_name
         }
 
         config_db.set_entry('VXLAN_TUNNEL_MAP', (VXLAN_TUNNEL_NAME, VXLAN_TUNNEL_MAP_PREFIX + str(index)), vxlan_tunnel_map_info)

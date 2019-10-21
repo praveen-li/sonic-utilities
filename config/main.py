@@ -9,7 +9,7 @@ import netaddr
 import re
 import syslog
 
-import sonic_platform
+import sonic_device_util
 from swsssdk import ConfigDBConnector
 from swsssdk import SonicV2Connector
 from minigraph import parse_device_desc_xml
@@ -17,6 +17,8 @@ from sonic_platform import get_system_routing_stack
 
 import aaa
 import mlnx
+
+CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help', '-?'])
 
 SONIC_CFGGEN_PATH = '/usr/local/bin/sonic-cfggen'
 SYSLOG_IDENTIFIER = "config"
@@ -294,47 +296,72 @@ def _get_all_interfaces():
     return interface_table_list
 
 def _stop_services():
-    services = [
-        'dhcp_relay',
+    services_to_stop = [
         'swss',
-        'snmp',
         'lldp',
         'pmon',
         'bgp',
-        'teamd',
         'hostcfgd',
     ]
-    for service in services:
+
+    for service in services_to_stop:
         try:
-            run_command("systemctl stop %s" % service, display_cmd=True)
+            click.echo("Stopping service {} ...".format(service))
+            run_command("systemctl stop {}".format(service))
+
         except SystemExit as e:
             log_error("Stopping {} failed with error {}".format(service, e))
             raise
 
+def _reset_failed_services():
+    services_to_reset = [
+        'bgp',
+        'dhcp_relay',
+        'hostcfgd',
+        'hostname-config',
+        'interfaces-config',
+        'lldp',
+        'ntp-config',
+        'pmon',
+        'radv',
+        'rsyslog-config',
+        'snmp',
+        'swss',
+        'syncd',
+        'teamd'
+    ]
+
+    for service in services_to_reset:
+        try:
+            click.echo("Resetting failed status for service {} ...".format(service))
+            run_command("systemctl reset-failed {}".format(service))
+        except SystemExit as e:
+            log_error("Failed to reset failed status for service {}".format(service))
+            raise
+
 def _restart_services():
-    services = [
+    services_to_restart = [
         'hostname-config',
         'interfaces-config',
         'ntp-config',
         'rsyslog-config',
         'swss',
         'bgp',
-        'teamd',
         'pmon',
         'lldp',
-        'snmp',
-        'dhcp_relay',
         'hostcfgd',
     ]
-    for service in services:
+
+    for service in services_to_restart:
         try:
-            run_command("systemctl restart %s" % service, display_cmd=True)
+            click.echo("Restarting service {} ...".format(service))
+            run_command("systemctl restart {}".format(service))
         except SystemExit as e:
             log_error("Restart {} failed with error {}".format(service, e))
             raise
 
 # This is our main entrypoint - the main 'config' command
-@click.group()
+@click.group(context_settings=CONTEXT_SETTINGS)
 def config():
     """SONiC command line - 'config' command"""
     if os.geteuid() != 0:
@@ -442,6 +469,9 @@ def reload(filename, yes, load_sysinfo):
     if os.path.isfile(db_migrator) and os.access(db_migrator, os.X_OK):
         run_command(db_migrator + ' -o migrate')
 
+    # We first run "systemctl reset-failed" to remove the "failed"
+    # status from all services before we attempt to restart them
+    _reset_failed_services()
     _restart_services()
 
 @config.command()
@@ -510,6 +540,9 @@ def load_minigraph():
     if os.path.isfile(db_migrator) and os.access(db_migrator, os.X_OK):
         run_command(db_migrator + ' -o set_version')
 
+    # We first run "systemctl reset-failed" to remove the "failed"
+    # status from all services before we attempt to restart them
+    _reset_failed_services()
     #FIXME: After config DB daemon is implemented, we'll no longer need to restart every service.
     _restart_services()
     click.echo("Please note setting loaded from minigraph will be lost after system reboot. To preserve setting, run `config save`.")
@@ -1327,14 +1360,17 @@ def pfc(ctx):
 #
 
 @pfc.command()
+@click.argument('interface_name', metavar='<interface_name>', required=True)
 @click.argument('status', type=click.Choice(['on', 'off']))
 @click.pass_context
-def asymmetric(ctx, status):
+def asymmetric(ctx, interface_name, status):
     """Set asymmetric PFC configuration."""
-    config_db = ctx.obj["config_db"]
-    interface = ctx.obj["interface_name"]
+    if get_interface_naming_mode() == "alias":
+        interface_name = interface_alias_to_name(interface_name)
+        if interface_name is None:
+            ctx.fail("'interface_name' is None!")
 
-    run_command("pfc config asymmetric {0} {1}".format(status, interface))
+    run_command("pfc config asymmetric {0} {1}".format(status, interface_name))
 
 #
 # 'platform' group ('config platform ...')
@@ -1344,7 +1380,7 @@ def asymmetric(ctx, status):
 def platform():
     """Platform-related configuration tasks"""
 
-version_info = sonic_platform.get_sonic_version_info()
+version_info = sonic_device_util.get_sonic_version_info()
 if (version_info and version_info.get('asic_type') == 'mellanox'):
     platform.add_command(mlnx.mlnx)
 
