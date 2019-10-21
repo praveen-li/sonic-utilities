@@ -13,8 +13,8 @@ try:
     import click
     import imp
     import syslog
-    from sonic_platform import get_machine_info
-    from sonic_platform import get_platform_info
+    from sonic_device_util import get_machine_info
+    from sonic_device_util import get_platform_info
     from syslog_helper import LogHelper
 except ImportError as e:
     raise ImportError("%s - required module not found" % str(e))

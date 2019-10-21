@@ -16,7 +16,7 @@ from tabulate import tabulate
 
 import sonic_device_util
 from swsssdk import ConfigDBConnector
-from sonic_platform import get_system_routing_stack
+from sonic_device_util import get_system_routing_stack
 from swsssdk import SonicV2Connector
 
 import mlnx
@@ -490,25 +490,6 @@ def expected(interfacename):
 
     click.echo(tabulate(body, header))
 
-<<<<<<< HEAD
-
-# 'summary' subcommand ("show interfaces summary")
-@interfaces.command()
-@click.argument('interfacename', required=False)
-@click.option('--verbose', is_flag=True, help="Enable verbose output")
-def summary(interfacename, verbose):
-    """Show interface status and information"""
-
-    cmd = "/sbin/ifconfig"
-
-    if interfacename is not None:
-        cmd += " {}".format(interfacename)
-
-    run_command(cmd, display_cmd=verbose)
-
-
-=======
->>>>>>> github-201811
 @interfaces.group(cls=AliasedGroup, default_if_no_args=False)
 def transceiver():
     """Show SFP Transceiver information"""

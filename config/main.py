@@ -13,7 +13,7 @@ import sonic_device_util
 from swsssdk import ConfigDBConnector
 from swsssdk import SonicV2Connector
 from minigraph import parse_device_desc_xml
-from sonic_platform import get_system_routing_stack
+from sonic_device_util import get_system_routing_stack
 
 import aaa
 import mlnx

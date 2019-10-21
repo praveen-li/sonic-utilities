@@ -5,7 +5,7 @@ import click
 import os
 import subprocess
 from click_default_group import DefaultGroup
-from sonic_platform import get_system_routing_stack
+from sonic_device_util import get_system_routing_stack
 
 try:
     import ConfigParser as configparser
