@@ -3,15 +3,30 @@
 # config_mgmt.py
 # Provides a class for configuration validation and for Dynamic Port Breakout.
 
+SONIC_YANG_MGMT = "../../sonic-yang-mgmt/"
+YANG_DIR = "../../sonic-yang-mgmt/yang-models"
+#CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/lca1-ta1-asw0_config_db.json"
+DEFAULT_CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/default_config_db.json"
+#CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/redis_config_db.json"
+CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/redis_config_db_addCase.json"
+
 try:
+    import re
+    from imp import load_source
+    #load_source('sonic_cfggen', '/usr/local/bin/sonic-cfggen')
+    #from sonic_cfggen import deep_update, FormatConverter
     #from swsssdk import ConfigDBConnector
+
     from pprint import PrettyPrinter, pprint
     from json import dump, load, dumps, loads
     from sys import path as sysPath
     from os import path as osPath
-    # import custom
-    sysPath.append(osPath.relpath("../../sonic-yang-mgmt/"))
+
+    # import sonic_yang
+    # TODO: Below 2 lines may not be needed after installation
+    sysPath.append(osPath.relpath(SONIC_YANG_MGMT))
     from sonic_yang import *
+
 except ImportError as e:
     raise ImportError("%s - required module not found" % str(e))
 
@@ -53,7 +68,6 @@ class configMgmt():
             print("Wrong source for config")
             exit(1)
 
-        YANG_DIR = "../../sonic-yang-mgmt/yang-models"
         self.sy = sonic_yang(YANG_DIR)
         # load yang models
         self.sy.loadYangModel()
@@ -65,7 +79,6 @@ class configMgmt():
     def readConfigDBJson(self):
 
         # TODO: match it with /etc/sonic/config_db.json
-        CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/lca1-ta1-asw0_config_db.json"
         self.configdbJsonIn = readJsonFile(CONFIG_DB_JSON_FILE)
         #print(type(self.configdbJsonIn))
         if not self.configdbJsonIn:
@@ -76,16 +89,22 @@ class configMgmt():
     """
         Get config from redis config DB
     """
-    def readConfigDB(self):
+    def readConfigDB(self, configDBdata=None):
 
-        # We have to rad similar to sonic-cfggen due to merging of keys
-        # configdb = ConfigDBConnector(**db_kwargs)
-        # configdb.connect()
-        # deep_update(data, FormatConverter.db_to_output(configdb.get_config()))
-        # json.dumps(FormatConverter.to_serialized(data)
+        """
+        # Read from config DB on sonic switch
 
-        #CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/redis_config_db.json"
-        CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/redis_config_db_addCase.json"
+        db_kwargs = dict(); data = dict()
+        configdb = ConfigDBConnector(**db_kwargs)
+        configdb.connect()
+        deep_update(data, FormatConverter.db_to_output(configdb.get_config()))
+        self.configdbJsonIn =  FormatConverter.to_serialized(data)
+
+        if configDBdata:
+            with open(configDBdata, 'w') as f:
+                dump(self.configdbJsonIn , f, indent=4)
+        """
+
         self.configdbJsonIn = readJsonFile(CONFIG_DB_JSON_FILE)
         #print(type(self.configdbJsonIn))
         if not self.configdbJsonIn:
@@ -114,7 +133,6 @@ class configMgmt():
             for port in delPorts:
                 xPathPort = self.sy.findXpathPortLeaf(port)
                 print("Generated Xpath:" + xPathPort)
-                xPathPort = "/sonic-port:sonic-port/PORT/PORT_LIST[port_name='Ethernet0']/port_name"
                 dep = self.sy.find_data_dependencies(str(xPathPort))
                 if dep:
                     #print(dep)
@@ -165,48 +183,14 @@ class configMgmt():
 
     return: Sucess: True or Failure: False
     """
-    def addPorts(self, addPorts=list(), portJson=dict(), force=False):
+    def addPorts(self, ports=list(), portJson=dict(), force=False):
 
         try:
             # get default config if forced
-            #if force:
-            #    defConfig = self.getDefaultConfig(addPorts)
-
-            defConfig = {
-                "VLAN": {
-                    "Vlan100": {
-                        "members": [
-                            "Ethernet0",
-                            "Ethernet2"
-                            ]
-                        }
-                    },
-                "ACL_TABLE": {
-                    "NO-NSW-PACL-V4": {
-                        "ports": [
-                            "Ethernet0",
-                            "Ethernet2"
-                            ]
-                        },
-                    "NO-NSW-PACL-V6": {
-                        "ports": [
-                            "Ethernet0",
-                            "Ethernet2"
-                            ]
-                        },
-                    },
-                "INTERFACE": {
-                    "Ethernet2|2a04:f547:6222:2002::2/126": {
-                        "scope": "global",
-                        "family": "IPv6"
-                        },
-                    },
-                "VLAN_MEMBER": {
-                    "Vlan100|Ethernet0": {
-                        "tagging_mode": "untagged"
-                    },
-                }
-            }
+            if force:
+                defConfig = self.getDefaultConfig(ports)
+            prtprint(defConfig)
+            return
 
             # Merge PortJson and default config
             portJson.update(defConfig)
@@ -234,6 +218,7 @@ class configMgmt():
 
         except Exception as e:
             print("Port Addition Failed")
+            print(e)
             return False
 
         return True
@@ -279,14 +264,71 @@ class configMgmt():
 
         return D1
 
-    def getDefaultConfig(self, add_Ports=list()):
+    """
+    Create a defConfig for given Ports from Default Config File.
+    """
+    def getDefaultConfig(self, ports=list()):
 
-        CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/redis_config_db.json"
-        print("Get Default config")
+        defConfigIn = readJsonFile(DEFAULT_CONFIG_DB_JSON_FILE)
+        #print(defConfigIn)
+        defConfigOut = dict()
+
+        """
+        create Default Config using DFS for all ports
+        """
+        def createDefConfig(In, Out, ports):
+
+            found = False
+            if isinstance(In, dict):
+                for key in In.keys():
+                    print("key:" + key)
+                    for port in ports:
+                        pattern = '^' + port + '\|' + '|' + port + '$' + \
+                            '|' + '^' + port + '$'
+                        #print(pattern)
+                        reg = re.compile(pattern)
+                        #print(reg)
+                        if reg.search(key):
+                            # In primary key, only 1 match can be found, so return
+                            print("Added key:" + key)
+                            Out[key] = In[key]
+                            found = True
+                            break
+                    # Put the key in Out by default, if not added already.
+                    # Remove later, if subelements does not contain any port.
+                    if Out.get(key) is None:
+                        Out[key] = type(In[key])()
+                        if createDefConfig(In[key], Out[key], ports) == False:
+                            del Out[key]
+                        else:
+                            found = True
+
+            elif isinstance(In, list):
+                for port in ports:
+                    if port in In:
+                        found = True
+                        Out.append(port)
+                        print("Added in list:" + port)
+
+            else:
+                # nothing for other keys
+                pass
+
+            return found
+
+        createDefConfig(defConfigIn, defConfigOut, ports)
+
+        return defConfigOut
+
+
+        """
         # get schemda depedencies on PORT
         xpath = "/sonic-port:sonic-port/sonic-port:PORT/sonic-port:PORT_LIST/sonic-port:port_name"
         deps = self.sy.find_schema_dependencies(xpath)
         print(deps)
+        """
+
+        return
 
     def validateConfigData(self):
 
@@ -361,7 +403,7 @@ def testRun_Add_Ports():
         }
     }
 
-    cm.addPorts(addPorts=['Ethernet0', 'Ethernet2'], portJson=portJson, force=True)
+    cm.addPorts(ports=['Ethernet0', 'Ethernet112'], portJson=portJson, force=True)
 
     return
 
@@ -393,6 +435,6 @@ def test_sonic_yang():
 
 if __name__ == '__main__':
     #testRun_Config_Reload_load()
-    testRun_Delete_Ports()
-    #testRun_Add_Ports()
+    #testRun_Delete_Ports()
+    testRun_Add_Ports()
     #test_sonic_yang()
