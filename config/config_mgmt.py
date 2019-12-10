@@ -3,53 +3,28 @@
 # config_mgmt.py
 # Provides a class for configuration validation and for Dynamic Port Breakout.
 
-SONIC_YANG_MGMT = "../../sonic-yang-mgmt/"
-YANG_DIR = "../../sonic-yang-mgmt/yang-models"
-CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/lca1-ta1-asw0_config_db.json"
-DEFAULT_CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/default_config_db.json"
-#CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/sample_config_db.json"
-#CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/redis_config_db.json"
-#CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/redis_config_db_addCase.json"
-
 try:
-    import re
-    """
-    On Sonic Switch:
+
+    # import from sonic-cfggen, re use this
     from imp import load_source
     load_source('sonic_cfggen', '/usr/local/bin/sonic-cfggen')
     from sonic_cfggen import deep_update, FormatConverter
     from swsssdk import ConfigDBConnector
-    """
-
     from pprint import PrettyPrinter, pprint
     from json import dump, load, dumps, loads
     from sys import path as sysPath
     from os import path as osPath
 
-    # import sonic_yang
-    # TODO: Below 2 lines may not be needed after installation
-    sysPath.append(osPath.relpath(SONIC_YANG_MGMT))
-    from sonic_yang import *
+    import sonic_yang
+    import re
 
 except ImportError as e:
     raise ImportError("%s - required module not found" % str(e))
 
-# Read given JSON file
-def readJsonFile(fileName):
-    #print(fileName)
-    try:
-        with open(fileName) as f:
-            result = load(f)
-    except Exception as e:
-        raise Exception(e)
-
-    return result
-
-# print pretty
-prt = PrettyPrinter(indent=4)
-def prtprint(obj):
-    prt.pprint(obj)
-    return
+# Globals
+CONFIG_DB_JSON_FILE = '/etc/sonic/confib_db.json'
+# TODO: Find a place for it on sonic switch.
+DEFAULT_CONFIG_DB_JSON_FILE = 'default_config_db.json'
 
 # Class to handle config managment for SONIC, this class will use PLY to verify
 # config for the commands which are capable of change in config DB.
@@ -61,7 +36,9 @@ class configMgmt():
         self.configdbJsonIn = None
         self.configdbJsonOut = None
 
-        # This class may not need to know about YANG_DIR ??
+        # This class may not need to know about YANG_DIR ?, sonic_yang shd use
+        # default dir.
+        YANG_DIR = "../../sonic-yang-mgmt/yang-models"
         self.sy = sonic_yang(YANG_DIR)
         # load yang models
         self.sy.loadYangModel()
@@ -83,7 +60,6 @@ class configMgmt():
 
     def readConfigDBJson(self):
 
-        # TODO: match it with /etc/sonic/config_db.json
         print('Reading data from config_db.json')
         self.configdbJsonIn = readJsonFile(CONFIG_DB_JSON_FILE)
         #print(type(self.configdbJsonIn))
@@ -169,8 +145,11 @@ class configMgmt():
         return None, True
 
     """
-    Add Ports to config DB, after validation of data tree
-    addPortJson: Config DB Json Part of all Ports same as PORT Table of Config DB.
+    Add Ports and default config for ports to config DB, after validation of
+    data tree
+
+    PortJson: Config DB Json Part of all Ports same as PORT Table of Config DB.
+    ports = list of ports
     force: If Force add default config as well.
 
     return: Sucess: True or Failure: False
@@ -217,6 +196,9 @@ class configMgmt():
 
         return True
 
+    """
+    Validate current Data Tree
+    """
     def validateConfigData(self):
 
         try:
@@ -227,12 +209,14 @@ class configMgmt():
         print('Data Validation successful')
         return True
 
-    # merge 2 configs in 1, both are dict
+    """
+    Merge second dict in first, Note both first and second dict will be changed
+    First Dict will have merged part D1 + D2
+    Second dict will have D2 - D1 [unique keys in D2]
+    """
     def mergeConfigs(self, D1, D2):
 
         try:
-            #import pdb; pdb.set_trace()
-
             def mergeItems(it1, it2):
                 if isinstance(it1, list) and isinstance(it2, list):
                     it1.extend(it2)
@@ -282,6 +266,8 @@ class configMgmt():
                 for key in In.keys():
                     #print("key:" + key)
                     for port in ports:
+                        # pattern is very specific to current primary keys in
+                        # config DB, may need to be updated later.
                         pattern = '^' + port + '\|' + '|' + port + '$' + \
                             '|' + '^' + port + '$'
                         #print(pattern)
@@ -289,7 +275,7 @@ class configMgmt():
                         #print(reg)
                         if reg.search(key):
                             # In primary key, only 1 match can be found, so return
-                            #print("Added key:" + key)
+                            # print("Added key:" + key)
                             Out[key] = In[key]
                             found = True
                             break
@@ -336,13 +322,13 @@ class configMgmt():
             print('Writing in Config DB')
             """
             On Sonic Switch
-
+            """
             db_kwargs = dict(); data = dict()
             configdb = ConfigDBConnector(**db_kwargs)
             configdb.connect(False)
             deep_update(data, FormatConverter.to_deserialized(jDiff))
             configdb.mod_config(FormatConverter.output_to_db(data))
-            """
+
             return
 
         # main code starts here
@@ -390,7 +376,7 @@ class configMgmt():
                     # make sure keys from diff are present in inp but not in outp
                     # then delete it.
                     if key in inp and key not in outp:
-                        # assign key to null, redis will delete entire key
+                        # assign key to None(null), redis will delete entire key
                         config[key] = None
                     else:
                         # log such keys
@@ -479,8 +465,10 @@ class configMgmt():
             print("Create Config to load in DB, Failed")
             print(e)
             raise e
-        with open('configToLoad.json', 'w') as f:
-            dump(configToLoad, f, indent=4)
+
+        # if debug
+        #with open('configToLoad.json', 'w') as f:
+        #    dump(configToLoad, f, indent=4)
 
         return configToLoad
 
@@ -490,6 +478,24 @@ class configMgmt():
         return diff(self.configdbJsonIn, self.configdbJsonOut, syntax='symmetric')
 
 # end of config_mgmt class
+
+### Test Functions ###
+# Read given JSON file
+def readJsonFile(fileName):
+    #print(fileName)
+    try:
+        with open(fileName) as f:
+            result = load(f)
+    except Exception as e:
+        raise Exception(e)
+
+    return result
+
+# print pretty
+prt = PrettyPrinter(indent=4)
+def prtprint(obj):
+    prt.pprint(obj)
+    return
 
 def testRun_Config_Reload_load():
     print('Test Run Config Reload')
