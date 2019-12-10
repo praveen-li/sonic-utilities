@@ -5,17 +5,21 @@
 
 SONIC_YANG_MGMT = "../../sonic-yang-mgmt/"
 YANG_DIR = "../../sonic-yang-mgmt/yang-models"
-#CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/lca1-ta1-asw0_config_db.json"
+CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/lca1-ta1-asw0_config_db.json"
 DEFAULT_CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/default_config_db.json"
+#CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/sample_config_db.json"
 #CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/redis_config_db.json"
-CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/redis_config_db_addCase.json"
+#CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/redis_config_db_addCase.json"
 
 try:
     import re
+    """
+    On Sonic Switch:
     from imp import load_source
-    #load_source('sonic_cfggen', '/usr/local/bin/sonic-cfggen')
-    #from sonic_cfggen import deep_update, FormatConverter
-    #from swsssdk import ConfigDBConnector
+    load_source('sonic_cfggen', '/usr/local/bin/sonic-cfggen')
+    from sonic_cfggen import deep_update, FormatConverter
+    from swsssdk import ConfigDBConnector
+    """
 
     from pprint import PrettyPrinter, pprint
     from json import dump, load, dumps, loads
@@ -57,8 +61,12 @@ class configMgmt():
         self.configdbJsonIn = None
         self.configdbJsonOut = None
 
-        # load jIn from config DB or from config DB json file. Call
-        # readConfigDBJson for it or call _readConfigDB.
+        # This class may not need to know about YANG_DIR ??
+        self.sy = sonic_yang(YANG_DIR)
+        # load yang models
+        self.sy.loadYangModel()
+
+        # load jIn from config DB or from config DB json file.
         source = source.lower()
         if source == 'configdbjson':
             self.readConfigDBJson()
@@ -68,9 +76,6 @@ class configMgmt():
             print("Wrong source for config")
             exit(1)
 
-        self.sy = sonic_yang(YANG_DIR)
-        # load yang models
-        self.sy.loadYangModel()
         # this will crop config, xlate and load.
         self.sy.load_data(self.configdbJsonIn)
 
@@ -79,6 +84,7 @@ class configMgmt():
     def readConfigDBJson(self):
 
         # TODO: match it with /etc/sonic/config_db.json
+        print('Reading data from config_db.json')
         self.configdbJsonIn = readJsonFile(CONFIG_DB_JSON_FILE)
         #print(type(self.configdbJsonIn))
         if not self.configdbJsonIn:
@@ -91,25 +97,19 @@ class configMgmt():
     """
     def readConfigDB(self, configDBdata=None):
 
-        """
-        # Read from config DB on sonic switch
+        print('Reading data from Redis configDb')
 
+        # Read from config DB on sonic switch
         db_kwargs = dict(); data = dict()
         configdb = ConfigDBConnector(**db_kwargs)
         configdb.connect()
         deep_update(data, FormatConverter.db_to_output(configdb.get_config()))
         self.configdbJsonIn =  FormatConverter.to_serialized(data)
 
+        # write in file to debug
         if configDBdata:
             with open(configDBdata, 'w') as f:
                 dump(self.configdbJsonIn , f, indent=4)
-        """
-
-        self.configdbJsonIn = readJsonFile(CONFIG_DB_JSON_FILE)
-        #print(type(self.configdbJsonIn))
-        if not self.configdbJsonIn:
-            print("Can not load config from config DB json file")
-
 
         return
 
@@ -124,21 +124,18 @@ class configMgmt():
     """
     def deletePorts(self, delPorts=list(), force=False):
 
-        print(f.__name__)
-
         try:
+            print('\nStart Port Deletion')
             deps = list()
 
             # Get all dependecies for ports
             for port in delPorts:
                 xPathPort = self.sy.findXpathPortLeaf(port)
-                print("Generated Xpath:" + xPathPort)
+                # print("Generated Xpath:" + xPathPort)
                 dep = self.sy.find_data_dependencies(str(xPathPort))
                 if dep:
-                    #print(dep)
                     deps.extend(dep)
 
-            print(deps)
             # No further action with no force and deps exist
             if force == False and deps:
                 return deps, False;
@@ -147,18 +144,14 @@ class configMgmt():
             # of deps fails, return immediately
             elif deps and force:
                 for dep in deps:
-                    print(dep)
-                    if self.sy.delete_node(str(dep)) == False:
-                        print("Port Deletion failed for {}".format(dep))
-                        return deps, False
+                    # print(dep)
+                    self.sy.delete_node(str(dep))
 
             # all deps are deleted now, delete all ports now
             for port in delPorts:
                 xPathPort = self.sy.findXpathPort(port)
-                print("xPathPort: " + xPathPort)
-                if self.sy.delete_node(str(xPathPort)) == False:
-                    print("Deletion failed for {}".format(xPathPort))
-                    return xPathPort, False
+                print("Deleting Port: " + port)
+                self.sy.delete_node(str(xPathPort))
 
             # Let`s Validate the tree now
             if self.validateConfigData()==False:
@@ -166,13 +159,12 @@ class configMgmt():
 
             # All great if we are here, Lets get the diff and update Config
             self.configdbJsonOut = self.sy.get_data()
-            if self.writeConfigDB()==False:
-                return _, False
+            self.updateDiffConfigDB()
 
         except Exception as e:
             print("Port Deletion Failed")
             print(e)
-            return None, False
+            return deps, False
 
         return None, True
 
@@ -186,16 +178,17 @@ class configMgmt():
     def addPorts(self, ports=list(), portJson=dict(), force=False):
 
         try:
+            print('\nStart Port Addition')
             # get default config if forced
+            defConfig = dict()
             if force:
                 defConfig = self.getDefaultConfig(ports)
-            prtprint(defConfig)
-            return
+            #prtprint(defConfig)
 
             # Merge PortJson and default config
             portJson.update(defConfig)
             defConfig = None
-            prtprint(portJson)
+            #prtprint(portJson)
 
             # get the latest Data Tree, save this in input config, since this
             # is our starting point now
@@ -205,7 +198,8 @@ class configMgmt():
             if self.configdbJsonOut is None:
                 self.configdbJsonOut = self.sy.get_data()
 
-            # merge new config with data tree, json level
+            # merge new config with data tree, this is json level merge
+            print("Merge Port Config for {}".format(ports))
             self.mergeConfigs(self.configdbJsonOut, portJson)
             # create a tree with merged config and validate, if validation is
             # sucessful, then configdbJsonOut contains final and valid config.
@@ -214,7 +208,7 @@ class configMgmt():
                 return False
 
             # All great if we are here, Let`s get the diff and update COnfig
-            self.writeConfigDB()
+            self.updateDiffConfigDB()
 
         except Exception as e:
             print("Port Addition Failed")
@@ -223,11 +217,20 @@ class configMgmt():
 
         return True
 
+    def validateConfigData(self):
+
+        try:
+            self.sy.validate_data_tree()
+        except Exception as e:
+            return False
+
+        print('Data Validation successful')
+        return True
+
     # merge 2 configs in 1, both are dict
     def mergeConfigs(self, D1, D2):
 
         try:
-            #print(" Merge Config")
             #import pdb; pdb.set_trace()
 
             def mergeItems(it1, it2):
@@ -240,7 +243,7 @@ class configMgmt():
                 elif isinstance(it1, dict) or isinstance(it2, dict):
                     raise ("Can not merge Configs, Dict problem")
                 else:
-                    print("Do nothing")
+                    #print("Do nothing")
                     # First Dict takes priority
                     pass
                 return
@@ -269,10 +272,6 @@ class configMgmt():
     """
     def getDefaultConfig(self, ports=list()):
 
-        defConfigIn = readJsonFile(DEFAULT_CONFIG_DB_JSON_FILE)
-        #print(defConfigIn)
-        defConfigOut = dict()
-
         """
         create Default Config using DFS for all ports
         """
@@ -281,7 +280,7 @@ class configMgmt():
             found = False
             if isinstance(In, dict):
                 for key in In.keys():
-                    print("key:" + key)
+                    #print("key:" + key)
                     for port in ports:
                         pattern = '^' + port + '\|' + '|' + port + '$' + \
                             '|' + '^' + port + '$'
@@ -290,7 +289,7 @@ class configMgmt():
                         #print(reg)
                         if reg.search(key):
                             # In primary key, only 1 match can be found, so return
-                            print("Added key:" + key)
+                            #print("Added key:" + key)
                             Out[key] = In[key]
                             found = True
                             break
@@ -308,7 +307,7 @@ class configMgmt():
                     if port in In:
                         found = True
                         Out.append(port)
-                        print("Added in list:" + port)
+                        #print("Added in list:" + port)
 
             else:
                 # nothing for other keys
@@ -316,34 +315,174 @@ class configMgmt():
 
             return found
 
-        createDefConfig(defConfigIn, defConfigOut, ports)
+        # function code
+        try:
+            print("Generating default config for {}".format(ports))
+            defConfigIn = readJsonFile(DEFAULT_CONFIG_DB_JSON_FILE)
+            #print(defConfigIn)
+            defConfigOut = dict()
+            createDefConfig(defConfigIn, defConfigOut, ports)
+        except Exception as e:
+            print("Get Default Config Failed")
+            print(e)
+            raise e
 
         return defConfigOut
 
+    def updateDiffConfigDB(self):
 
-        """
-        # get schemda depedencies on PORT
-        xpath = "/sonic-port:sonic-port/sonic-port:PORT/sonic-port:PORT_LIST/sonic-port:port_name"
-        deps = self.sy.find_schema_dependencies(xpath)
-        print(deps)
-        """
+        ### Internal Functions ###
+        def writeConfigDB(jDiff):
+            print('Writing in Config DB')
+            """
+            On Sonic Switch
+
+            db_kwargs = dict(); data = dict()
+            configdb = ConfigDBConnector(**db_kwargs)
+            configdb.connect(False)
+            deep_update(data, FormatConverter.to_deserialized(jDiff))
+            configdb.mod_config(FormatConverter.output_to_db(data))
+            """
+            return
+
+        # main code starts here
+        try:
+            # Get the Diff
+            print('Generate Final Config to write in DB')
+            configDBdiff = self.diffJson()
+            #print("\n***Config Diff***\n")
+            #prtprint(configDBdiff)
+
+            # Process diff and create Config which can be updated in Config DB
+            configToLoad = self.createConfigToLoad(configDBdiff, \
+                self.configdbJsonIn, self.configdbJsonOut)
+            #print("\n***Config To Load***\n")
+            #prtprint(configToLoad)
+
+            #Write to Config DB now
+            writeConfigDB(configToLoad)
+
+        except Exception as e:
+            print("Update to Config DB Failed")
+            print(e)
+            raise e
 
         return
 
-    def validateConfigData(self):
+    """
+    Create the config to write in Config DB from json diff
+    diff: diff in input config and output config.
+    inp: input config before delete/add ports.
+    outp: output config after delete/add ports.
+    """
+    def createConfigToLoad(self, diff, inp, outp):
 
-        if self.sy.validate_data_tree()==False:
-            print("Data Velidation Failed")
-            return False
-        return True
+        ### Internal Functions ###
+        """
+        Handle deletes in diff dict
+        """
+        def deleteHandler(diff, inp, outp, config):
 
-    def writeConfigDB(self):
+            # if output is dict, delete keys from config
+            if isinstance(inp, dict):
+                for key in diff:
+                    #print(key)
+                    # make sure keys from diff are present in inp but not in outp
+                    # then delete it.
+                    if key in inp and key not in outp:
+                        # assign key to null, redis will delete entire key
+                        config[key] = None
+                    else:
+                        # log such keys
+                        print("Diff: Probably wrong key: {}".format(key))
 
-        # Get the Diff
-        configDBdiff = self.diffJson()
-        #prtprint(configDBdiff)
-        # Update Config DB:
-        return
+            elif isinstance(inp, list):
+                # just take list from output
+                # print("Delete from List: {} {} {}".format(inp, outp, list))
+                #print(type(config))
+                config.extend(outp)
+
+            return
+
+        """
+        Handle inserts in diff dict
+        """
+        def insertHandler(diff, inp, outp, config):
+
+            # if outp is a dict
+            if isinstance(outp, dict):
+                for key in diff:
+                    #print(key)
+                    # make sure keys are only in outp
+                    if key not in inp and key in outp:
+                        # assign key in config same as outp
+                        config[key] = outp[key]
+                    else:
+                        # log such keys
+                        print("Diff: Probably wrong key: {}".format(key))
+
+            elif isinstance(outp, list):
+                # just take list from output
+                # print("Delete from List: {} {} {}".format(inp, outp, list))
+                config.extend(outp)
+
+            return
+
+        """
+        Recursively iterate diff to generate config to write in configDB
+        """
+        def recurCreateConfig(diff, inp, outp, config):
+
+            changed = False
+            # updates are represented by list in diff and as dict in outp\inp
+            # we do not allow updates right now
+            if isinstance(diff, list) and isinstance(outp, dict):
+                return changed
+
+            idx = -1
+            for key in diff:
+                #print(key)
+                idx = idx + 1
+                if str(key) == '$delete':
+                    deleteHandler(diff[key], inp, outp, config)
+                    changed = True
+                elif str(key) == '$insert':
+                    insertHandler(diff[key], inp, outp, config)
+                    changed = True
+                else:
+                    # insert in config by default, remove later if not needed
+                    if isinstance(diff, dict):
+                        # config should match with outp
+                        config[key] = type(outp[key])()
+                        if recurCreateConfig(diff[key], inp[key], outp[key], \
+                            config[key]) == False:
+                            del config[key]
+                        else:
+                            changed = True
+                    elif isinstance(diff, list):
+                        config.append(key)
+                        if recurCreateConfig(diff[idx], inp[idx], outp[idx], \
+                            config[-1]) == False:
+                            del config[-1]
+                        else:
+                            changed = True
+
+            return changed
+
+        ### Function Code ###
+        try:
+            configToLoad = dict()
+            #import pdb; pdb.set_trace()
+            recurCreateConfig(diff, inp, outp, configToLoad)
+
+        except Exception as e:
+            print("Create Config to load in DB, Failed")
+            print(e)
+            raise e
+        with open('configToLoad.json', 'w') as f:
+            dump(configToLoad, f, indent=4)
+
+        return configToLoad
 
     def diffJson(self):
 
@@ -362,27 +501,17 @@ def testRun_Config_Reload_load():
 
     return
 
-def testRun_Delete_Ports():
+def testRun_Delete_Add_Ports():
+
     print('Test Run Delete Ports')
     cm = configMgmt('configDBjson')
-    # Validate
-    valid = cm.validateConfigData()
-    print("Data is valid: {}".format(valid))
 
-    deps, ret = cm.deletePorts(delPorts=['Ethernet0'], force=True)
+    deps, ret = cm.deletePorts(delPorts=['Ethernet0', 'Ethernet1', 'Ethernet2', 'Ethernet3'], force=True)
     if ret == False:
         print("Port Deletion Test failed")
-        return
+        return None
 
-    return
-
-# Test fo Add Ports
-def testRun_Add_Ports():
-    print('Test Run Add Ports')
-    cm = configMgmt('configDB')
-    # Validate
-    valid = cm.validateConfigData()
-    print("Data is valid: {}".format(valid))
+    print("\n***Port Deletion Test Passed***\n")
 
     portJson = {
         "PORT": {
@@ -403,38 +532,16 @@ def testRun_Add_Ports():
         }
     }
 
-    cm.addPorts(ports=['Ethernet0', 'Ethernet112'], portJson=portJson, force=True)
+    ret = cm.addPorts(ports=['Ethernet0', 'Ethernet2'], portJson=portJson, force=True)
+    if ret == False:
+        print("Port Addition Test failed")
+        return None
+
+    print("\n***Port Addition Test Passed***\n")
 
     return
 
-def test_sonic_yang():
-
-        # CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/yang_orig/sonic_config_data.json"
-        CONFIG_DB_JSON_FILE = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/lca1-ta1-asw0_config_db.json"
-
-        #YANG_DIR = "../../sonic-yang-mgmt/tests/yang-model-tests/custom_code/yang_orig"
-        YANG_DIR = "../../sonic-yang-mgmt/yang-models"
-
-        sy = sonic_yang(YANG_DIR)
-        # load yang models
-        #sy.load_schema_modules(YANG_DIR)
-        sy.loadYangModel()
-
-        #sy.load_data(CONFIG_DB_JSON_FILE)
-        # this will crop config, xlate and load.
-        sy.load_data(readJsonFile(CONFIG_DB_JSON_FILE))
-
-        #xPathPort = "/sonic-vlan:PORT/PORT_LIST[port_name='Ethernet0']/port_name"
-        xPathPort = "/sonic-port:sonic-port/PORT/PORT_LIST[port_name='Ethernet0']/port_name"
-
-        print("xpath: " + xPathPort)
-        dep = sy.find_data_dependencies(xPathPort)
-        for d in dep:
-            print(d)
-
-
 if __name__ == '__main__':
     #testRun_Config_Reload_load()
-    #testRun_Delete_Ports()
-    testRun_Add_Ports()
+    testRun_Delete_Add_Ports()
     #test_sonic_yang()

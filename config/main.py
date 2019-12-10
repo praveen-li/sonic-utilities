@@ -17,6 +17,7 @@ from minigraph import parse_device_desc_xml
 
 import aaa
 import mlnx
+import config_mgmt
 
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help', '-?'])
 
