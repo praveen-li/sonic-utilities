@@ -15,7 +15,7 @@ try:
     from sys import path as sysPath
     from os import path as osPath
 
-    import sonic_yang
+    from sonic_yang import sonic_yang
     import re
 
 except ImportError as e:
@@ -33,28 +33,34 @@ class configMgmt():
 
     def __init__(self, source="configDBJson"):
 
-        self.configdbJsonIn = None
-        self.configdbJsonOut = None
+        try:
+            self.configdbJsonIn = None
+            self.configdbJsonOut = None
 
-        # This class may not need to know about YANG_DIR ?, sonic_yang shd use
-        # default dir.
-        YANG_DIR = "../../sonic-yang-mgmt/yang-models"
-        self.sy = sonic_yang(YANG_DIR)
-        # load yang models
-        self.sy.loadYangModel()
+            # This class may not need to know about YANG_DIR ?, sonic_yang shd use
+            # default dir.
+            YANG_DIR = "/usr/local/yang-models"
+            self.sy = sonic_yang(YANG_DIR)
+            # load yang models
+            self.sy.loadYangModel()
 
-        # load jIn from config DB or from config DB json file.
-        source = source.lower()
-        if source == 'configdbjson':
-            self.readConfigDBJson()
-        elif source == 'configdb':
-            self.readConfigDB()
-        else:
-            print("Wrong source for config")
-            exit(1)
+            # load jIn from config DB or from config DB json file.
+            source = source.lower()
+            if source == 'configdbjson':
+                self.readConfigDBJson()
+            elif source == 'configdb':
+                self.readConfigDB()
+            else:
+                print("Wrong source for config")
+                exit(1)
 
-        # this will crop config, xlate and load.
-        self.sy.load_data(self.configdbJsonIn)
+            # this will crop config, xlate and load.
+            self.sy.load_data(self.configdbJsonIn)
+
+        except Exception as e:
+            print(e)
+            raise(Exception('configMgmt Class creation failed'))
+
 
         return
 
@@ -107,6 +113,7 @@ class configMgmt():
             # Get all dependecies for ports
             for port in delPorts:
                 xPathPort = self.sy.findXpathPortLeaf(port)
+                print('Find dependecies for port {}'.format(port))
                 # print("Generated Xpath:" + xPathPort)
                 dep = self.sy.find_data_dependencies(str(xPathPort))
                 if dep:
@@ -510,7 +517,11 @@ def testRun_Config_Reload_load():
 def testRun_Delete_Add_Ports():
 
     print('Test Run Delete Ports')
-    cm = configMgmt('configDBjson')
+    try:
+        cm = configMgmt('configDB')
+    except Exception as e:
+        print(e)
+        return
 
     deps, ret = cm.deletePorts(delPorts=['Ethernet0', 'Ethernet1', 'Ethernet2', 'Ethernet3'], force=True)
     if ret == False:
@@ -551,3 +562,4 @@ if __name__ == '__main__':
     #testRun_Config_Reload_load()
     testRun_Delete_Add_Ports()
     #test_sonic_yang()
+
