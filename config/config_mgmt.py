@@ -31,11 +31,17 @@ DEFAULT_CONFIG_DB_JSON_FILE = 'default_config_db.json'
 
 class configMgmt():
 
-    def __init__(self, source="configDBJson"):
+    def __init__(self, source="configDBJson", debug=False):
 
         try:
             self.configdbJsonIn = None
             self.configdbJsonOut = None
+
+            self.DEBUG_FILE = None
+            if debug:
+                self.DEBUG_FILE = '_debug_config_mgmt'
+                with open(self.DEBUG_FILE, 'w') as df:
+                    df.write('--- Start config_mgmt logging ---\n\n')
 
             # This class may not need to know about YANG_DIR ?, sonic_yang shd use
             # default dir.
@@ -46,13 +52,11 @@ class configMgmt():
 
             # load jIn from config DB or from config DB json file.
             source = source.lower()
-            if source == 'configdbjson':
-                self.readConfigDBJson()
-            elif source == 'configdb':
+            if source == 'configdb':
                 self.readConfigDB()
+            # treat any other source as file input
             else:
-                print("Wrong source for config")
-                exit(1)
+                self.readConfigDBJson(source)
 
             # this will crop config, xlate and load.
             self.sy.load_data(self.configdbJsonIn)
@@ -61,23 +65,37 @@ class configMgmt():
             print(e)
             raise(Exception('configMgmt Class creation failed'))
 
+        return
+
+    def logInFile(self, header="", obj=None, json=False):
+
+        if self.DEBUG_FILE:
+            with open(self.DEBUG_FILE, 'a') as df:
+                df.write('\n\n{}\n'.format(header))
+                if json:
+                    dump(obj, df, indent=4)
+                else:
+                    #print(obj)
+                    df.write('{}'.format(obj))
+                df.write('\n----' )
 
         return
 
-    def readConfigDBJson(self):
+    def readConfigDBJson(self, source=CONFIG_DB_JSON_FILE):
 
-        print('Reading data from config_db.json')
-        self.configdbJsonIn = readJsonFile(CONFIG_DB_JSON_FILE)
+        print('Reading data from {}'.format(source))
+        self.configdbJsonIn = readJsonFile(source)
         #print(type(self.configdbJsonIn))
         if not self.configdbJsonIn:
-            print("Can not load config from config DB json file")
+            raise(Exception("Can not load config from config DB json file"))
+        self.logInFile('Reading Input', self.configdbJsonIn, True)
 
         return
 
     """
         Get config from redis config DB
     """
-    def readConfigDB(self, configDBdata=None):
+    def readConfigDB(self):
 
         print('Reading data from Redis configDb')
 
@@ -87,11 +105,7 @@ class configMgmt():
         configdb.connect()
         deep_update(data, FormatConverter.db_to_output(configdb.get_config()))
         self.configdbJsonIn =  FormatConverter.to_serialized(data)
-
-        # write in file to debug
-        if configDBdata:
-            with open(configDBdata, 'w') as f:
-                dump(self.configdbJsonIn , f, indent=4)
+        self.logInFile('Reading Input', self.configdbJsonIn, True)
 
         return
 
@@ -118,6 +132,7 @@ class configMgmt():
                 dep = self.sy.find_data_dependencies(str(xPathPort))
                 if dep:
                     deps.extend(dep)
+            self.logInFile('Dependencies', deps)
 
             # No further action with no force and deps exist
             if force == False and deps:
@@ -127,13 +142,14 @@ class configMgmt():
             # of deps fails, return immediately
             elif deps and force:
                 for dep in deps:
-                    # print(dep)
+                    self.logInFile('Deleting', dep)
                     self.sy.delete_node(str(dep))
 
             # all deps are deleted now, delete all ports now
             for port in delPorts:
                 xPathPort = self.sy.findXpathPort(port)
                 print("Deleting Port: " + port)
+                self.logInFile('Deleting Port:{}'.format(port), xPathPort)
                 self.sy.delete_node(str(xPathPort))
 
             # Let`s Validate the tree now
@@ -169,6 +185,8 @@ class configMgmt():
             defConfig = dict()
             if force:
                 defConfig = self.getDefaultConfig(ports)
+                self.logInFile('Default Config for {}'.format(ports), \
+                    defConfig, json=True)
             #prtprint(defConfig)
 
             # Merge PortJson and default config
@@ -353,6 +371,7 @@ class configMgmt():
             #prtprint(configToLoad)
 
             #Write to Config DB now
+            self.logInFile('Writing in DB', configToLoad, json=True)
             writeConfigDB(configToLoad)
 
         except Exception as e:
@@ -518,7 +537,7 @@ def testRun_Delete_Add_Ports():
 
     print('Test Run Delete Ports')
     try:
-        cm = configMgmt('configDB')
+        cm = configMgmt('configDB', debug=True)
     except Exception as e:
         print(e)
         return
@@ -562,4 +581,3 @@ if __name__ == '__main__':
     #testRun_Config_Reload_load()
     testRun_Delete_Add_Ports()
     #test_sonic_yang()
-
