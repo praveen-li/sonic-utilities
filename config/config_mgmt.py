@@ -14,6 +14,8 @@ try:
     from json import dump, load, dumps, loads
     from sys import path as sysPath
     from os import path as osPath
+    from os import system
+    from datetime import datetime
 
     from sonic_yang import sonic_yang
     import re
@@ -22,16 +24,19 @@ except ImportError as e:
     raise ImportError("%s - required module not found" % str(e))
 
 # Globals
+# This class may not need to know about YANG_DIR ?, sonic_yang shd use
+# default dir.
+YANG_DIR = "/usr/local/yang-models"
 CONFIG_DB_JSON_FILE = '/etc/sonic/confib_db.json'
 # TODO: Find a place for it on sonic switch.
-DEFAULT_CONFIG_DB_JSON_FILE = 'default_config_db.json'
+DEFAULT_CONFIG_DB_JSON_FILE = '/etc/sonic/default_config_db.json'
 
 # Class to handle config managment for SONIC, this class will use PLY to verify
 # config for the commands which are capable of change in config DB.
 
 class configMgmt():
 
-    def __init__(self, source="configDBJson", debug=False):
+    def __init__(self, source="configDB", debug=False):
 
         try:
             self.configdbJsonIn = None
@@ -43,9 +48,6 @@ class configMgmt():
                 with open(self.DEBUG_FILE, 'w') as df:
                     df.write('--- Start config_mgmt logging ---\n\n')
 
-            # This class may not need to know about YANG_DIR ?, sonic_yang shd use
-            # default dir.
-            YANG_DIR = "/usr/local/yang-models"
             self.sy = sonic_yang(YANG_DIR)
             # load yang models
             self.sy.loadYangModel()
@@ -71,13 +73,14 @@ class configMgmt():
 
         if self.DEBUG_FILE:
             with open(self.DEBUG_FILE, 'a') as df:
-                df.write('\n\n{}\n'.format(header))
+                time = datetime.now()
+                df.write('\n\n{}: {}\n'.format(time, header))
                 if json:
                     dump(obj, df, indent=4)
                 else:
                     #print(obj)
-                    df.write('{}'.format(obj))
-                df.write('\n----' )
+                    df.write('{}: {}'.format(time, obj))
+                df.write('\n----')
 
         return
 
@@ -173,17 +176,17 @@ class configMgmt():
 
     PortJson: Config DB Json Part of all Ports same as PORT Table of Config DB.
     ports = list of ports
-    force: If Force add default config as well.
+    loadDefConfig: If loadDefConfig add default config as well.
 
     return: Sucess: True or Failure: False
     """
-    def addPorts(self, ports=list(), portJson=dict(), force=False):
+    def addPorts(self, ports=list(), portJson=dict(), loadDefConfig=True):
 
         try:
             print('\nStart Port Addition')
             # get default config if forced
             defConfig = dict()
-            if force:
+            if loadDefConfig:
                 defConfig = self.getDefaultConfig(ports)
                 self.logInFile('Default Config for {}'.format(ports), \
                     defConfig, json=True)
@@ -524,6 +527,10 @@ def prtprint(obj):
     return
 
 def testRun_Config_Reload_load():
+
+    # TODO: As of now, start from fixed config
+    startConfigFile = 'start_config_db.json'
+
     print('Test Run Config Reload')
     cm = configMgmt('configDBJson')
 
@@ -568,7 +575,7 @@ def testRun_Delete_Add_Ports():
         }
     }
 
-    ret = cm.addPorts(ports=['Ethernet0', 'Ethernet2'], portJson=portJson, force=True)
+    ret = cm.addPorts(ports=['Ethernet0', 'Ethernet2'], portJson=portJson)
     if ret == False:
         print("Port Addition Test failed")
         return None
