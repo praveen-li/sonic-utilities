@@ -8,7 +8,7 @@ try:
     # import from sonic-cfggen, re use this
     from imp import load_source
     load_source('sonic_cfggen', '/usr/local/bin/sonic-cfggen')
-    from sonic_cfggen import deep_update, FormatConverter
+    from sonic_cfggen import deep_update, FormatConverter, sort_data
     from swsssdk import ConfigDBConnector
     from pprint import PrettyPrinter, pprint
     from json import dump, load, dumps, loads
@@ -17,7 +17,7 @@ try:
     from os import system
     from datetime import datetime
 
-    from sonic_yang import sonic_yang
+    import sonic_yang
     import re
 
 except ImportError as e:
@@ -48,13 +48,12 @@ class configMgmt():
                 with open(self.DEBUG_FILE, 'w') as df:
                     df.write('--- Start config_mgmt logging ---\n\n')
 
-            self.sy = sonic_yang(YANG_DIR)
+            self.sy = sonic_yang.sonic_yang(YANG_DIR, debug=debug)
             # load yang models
             self.sy.loadYangModel()
 
             # load jIn from config DB or from config DB json file.
-            source = source.lower()
-            if source == 'configdb':
+            if source.lower() == 'configdb':
                 self.readConfigDB()
             # treat any other source as file input
             else:
@@ -77,7 +76,7 @@ class configMgmt():
                 df.write('\n\n{}: {}\n'.format(time, header))
                 if json:
                     dump(obj, df, indent=4)
-                else:
+                elif obj:
                     #print(obj)
                     df.write('{}: {}'.format(time, obj))
                 df.write('\n----')
@@ -124,6 +123,8 @@ class configMgmt():
     def deletePorts(self, delPorts=list(), force=False):
 
         try:
+            self.logInFile("delPorts ports:{} force:{}".format(delPorts, force))
+
             print('\nStart Port Deletion')
             deps = list()
 
@@ -164,8 +165,8 @@ class configMgmt():
             self.updateDiffConfigDB()
 
         except Exception as e:
-            print("Port Deletion Failed")
             print(e)
+            print("Port Deletion Failed")
             return deps, False
 
         return None, True
@@ -183,6 +184,9 @@ class configMgmt():
     def addPorts(self, ports=list(), portJson=dict(), loadDefConfig=True):
 
         try:
+            self.logInFile("addPorts ports:{} loadDefConfig:{}".format(ports, loadDefConfig))
+            self.logInFile("addPorts Args portjson: ", portJson)
+
             print('\nStart Port Addition')
             # get default config if forced
             defConfig = dict()
@@ -218,8 +222,8 @@ class configMgmt():
             self.updateDiffConfigDB()
 
         except Exception as e:
-            print("Port Addition Failed")
             print(e)
+            print("Port Addition Failed")
             return False
 
         return True
@@ -355,6 +359,8 @@ class configMgmt():
             configdb = ConfigDBConnector(**db_kwargs)
             configdb.connect(False)
             deep_update(data, FormatConverter.to_deserialized(jDiff))
+            data = sort_data(data)
+            self.logInFile("Write in DB: Last Data", data)
             configdb.mod_config(FormatConverter.output_to_db(data))
 
             return
@@ -374,7 +380,6 @@ class configMgmt():
             #prtprint(configToLoad)
 
             #Write to Config DB now
-            self.logInFile('Writing in DB', configToLoad, json=True)
             writeConfigDB(configToLoad)
 
         except Exception as e:
@@ -528,7 +533,7 @@ def prtprint(obj):
 
 def testRun_Config_Reload_load():
 
-    # TODO: As of now, start from fixed config
+    # TODO: As of now, start from fixed config, need to fix this test mo
     startConfigFile = 'start_config_db.json'
 
     print('Test Run Config Reload')
@@ -540,8 +545,9 @@ def testRun_Config_Reload_load():
 
     return
 
-def testRun_Delete_Add_Ports():
+def testRun_Delete_Add_Ports_1():
 
+    #TODO: Verify config in Config DB  after writing to config DB.
     print('Test Run Delete Ports')
     try:
         cm = configMgmt('configDB', debug=True)
@@ -555,27 +561,30 @@ def testRun_Delete_Add_Ports():
         return None
 
     print("\n***Port Deletion Test Passed***\n")
+    import time
+    time.sleep(5)
 
     portJson = {
         "PORT": {
             "Ethernet0": {
                     "alias": "Eth1/1",
                     "admin_status": "up",
-                    "lanes": "65, 66",
+                    "lanes": "65,66",
                     "description": "",
                     "speed": "50000"
             },
             "Ethernet2": {
                     "alias": "Eth1/3",
                     "admin_status": "up",
-                    "lanes": "67, 68",
+                    "lanes": "67,68",
                     "description": "",
                     "speed": "50000"
             }
         }
     }
 
-    ret = cm.addPorts(ports=['Ethernet0', 'Ethernet2'], portJson=portJson)
+    #ret = cm.addPorts(ports=['Ethernet0', 'Ethernet2'], portJson=portJson, loadDefConfig=False)
+    ret = cm.addPorts(ports=['Ethernet0', 'Ethernet2'], portJson=portJson, loadDefConfig=True)
     if ret == False:
         print("Port Addition Test failed")
         return None
@@ -584,7 +593,125 @@ def testRun_Delete_Add_Ports():
 
     return
 
-if __name__ == '__main__':
+def testRun_Delete_Add_Ports_2():
+
+    #TODO: Verify config in Config DB  after writing to config DB.
+    print('Test Run Delete Ports')
+    try:
+        cm = configMgmt('configDB', debug=True)
+    except Exception as e:
+        print(e)
+        return
+
+    deps, ret = cm.deletePorts(delPorts=['Ethernet0', 'Ethernet2'], force=True)
+    if ret == False:
+        print("Port Deletion Test failed")
+        return None
+
+    print("\n***Port Deletion Test Passed***\n")
+    import time
+    time.sleep(5)
+
+    portJson = {
+        "PORT": {
+            "Ethernet0": {
+                    "alias": "Eth1/1",
+                    "admin_status": "up",
+                    "lanes": "65,66,67,68",
+                    "description": "",
+                    "speed": "100000"
+            }
+        }
+    }
+
+    #ret = cm.addPorts(ports=['Ethernet0'], portJson=portJson, loadDefConfig=False)
+    ret = cm.addPorts(ports=['Ethernet0'], portJson=portJson, loadDefConfig=True)
+    if ret == False:
+        print("Port Addition Test failed")
+        return None
+
+    print("\n***Port Addition Test Passed***\n")
+
+    return
+
+def testRun_Delete_Add_Ports_3():
+
+    #TODO: Verify config in Config DB  after writing to config DB.
+    print('Test Run Delete Ports')
+    try:
+        cm = configMgmt('configDB', debug=True)
+    except Exception as e:
+        print(e)
+        return
+
+    deps, ret = cm.deletePorts(delPorts=['Ethernet0'], force=True)
+    if ret == False:
+        print("Port Deletion Test failed")
+        return None
+
+    print("\n***Port Deletion Test Passed***\n")
+    import time
+    time.sleep(5)
+
+    portJson = {
+        "PORT": {
+            "Ethernet0": {
+                "alias": "Eth1/1",
+                "description": "",
+                "index": "0",
+                "lanes": "65",
+                "speed": "25000"
+            },
+            "Ethernet1": {
+                "alias": "Eth1/2",
+                "description": "",
+                "index": "0",
+                "lanes": "66",
+                "speed": "25000"
+            },
+            "Ethernet2": {
+                "alias": "Eth1/3",
+                "description": "",
+                "index": "0",
+                "lanes": "67",
+                "speed": "25000"
+            },
+            "Ethernet3": {
+                "alias": "Eth1/4",
+                "description": "",
+                "index": "0",
+                "lanes": "68",
+                "speed": "25000"
+            }
+        }
+    }
+
+    #ret = cm.addPorts(ports=['Ethernet0', 'Ethernet1', 'Ethernet2', 'Ethernet3'], portJson=portJson, loadDefConfig=False)
+    ret = cm.addPorts(ports=['Ethernet0', 'Ethernet1', 'Ethernet2', 'Ethernet3'], portJson=portJson, loadDefConfig=True)
+    if ret == False:
+        print("Port Addition Test failed")
+        return None
+
+    print("\n***Port Addition Test Passed***\n")
+
+    return
+
+def main():
+    from sys import argv
+    if len(argv) > 1:
+        num = argv[1]
+    else:
+        print("Please provide a number 1-3")
+        return
+
     #testRun_Config_Reload_load()
-    testRun_Delete_Add_Ports()
-    #test_sonic_yang()
+    if num == '1':
+        testRun_Delete_Add_Ports_1()
+    elif num == '2':
+        testRun_Delete_Add_Ports_2()
+    elif num == '3':
+        testRun_Delete_Add_Ports_3()
+
+
+if __name__ == '__main__':
+    main()
