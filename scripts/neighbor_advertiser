@@ -15,6 +15,8 @@ import argparse
 import syslog
 import traceback
 import subprocess
+import time
+import warnings
 import sonic_device_util
 from swsssdk import ConfigDBConnector
 from swsssdk import SonicV2Connector
@@ -28,6 +30,7 @@ from netaddr import IPAddress, IPNetwork
 DEFAULT_DURATION = 300
 DEFAULT_REQUEST_TIMEOUT = 2
 DEFAULT_FERRET_QUERY_RETRIES = 3
+DEFAULT_CONFIG_DB_WAIT_TIME = 3 # seconds
 SYSLOG_IDENTIFIER = 'neighbor_advertiser'
 
 
@@ -261,7 +264,7 @@ def get_vlan_addresses(vlan_interface):
                 ipv6_addr.append(keys[1].split('/')[0])
             elif keys[0] == 'link/ether':
                 mac_addr = keys[1]
-    except Exception as e:
+    except Exception:
         log_error('failed to get %s addresses from o.s.' % vlan_interface)
         pass
 
@@ -337,26 +340,58 @@ def construct_neighbor_advertiser_slice():
     return slice_obj
 
 
+def wrapped_ferret_request(request_slice, https_endpoint, http_endpoint):
+    """
+        Attempts to reach ferret by first trying HTTPS, failing over to HTTP in
+        case of failure (e.g. timeout, endpoint not found, etc.).
+    """
+    response = None
+
+    # NOTE: While we transition to HTTPS we're disabling the verify field. We
+    # need to add a way to fetch certificates in this script ASAP.
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            response = requests.post(https_endpoint,
+                                     json=request_slice,
+                                     timeout=DEFAULT_REQUEST_TIMEOUT,
+                                     verify=False)
+
+            if not response:
+                raise RuntimeError("No response obtained from HTTPS endpoint")
+
+            # If the request is unsuccessful (e.g. has a non 2xx response code),
+            # we'll try HTTP
+            response.raise_for_status()
+    except Exception as e:
+        log_info("Connect HTTPS Ferret endpoint failed (error: {}), trying HTTP...".format(e))
+        response = requests.post(http_endpoint,
+                                 json=request_slice,
+                                 timeout=DEFAULT_REQUEST_TIMEOUT)
+
+        if not response:
+            raise RuntimeError("No response obtained from HTTP endpoint")
+
+        # If the request is unsuccessful (e.g. has a non 2xx response code),
+        # we'll consider it failed
+        response.raise_for_status()
+
+    return response
+
+
 def post_neighbor_advertiser_slice(ferret_service_vip):
     request_slice = construct_neighbor_advertiser_slice()
     save_as_json(request_slice, NEIGHBOR_ADVERTISER_REQUEST_SLICE_PATH)
 
-    url = 'http://{}:85{}{}'.format(ferret_service_vip, FERRET_NEIGHBOR_ADVERTISER_API_PREFIX, get_switch_name())
+    https_endpoint = "https://{}:448{}{}".format(ferret_service_vip, FERRET_NEIGHBOR_ADVERTISER_API_PREFIX, get_switch_name())
+    http_endpoint = "http://{}:85{}{}".format(ferret_service_vip, FERRET_NEIGHBOR_ADVERTISER_API_PREFIX, get_switch_name())
     response = None
 
     for retry in range(DEFAULT_FERRET_QUERY_RETRIES):
         try:
-            response = requests.post(url, json = request_slice, timeout = DEFAULT_REQUEST_TIMEOUT)
+            response = wrapped_ferret_request(request_slice, https_endpoint, http_endpoint)
         except Exception as e:
-            log_error('The request failed, vip: {}, error: {}'.format(ferret_service_vip, e))
-            return None
-
-        # Handle response errors
-        if not response:
-            log_error('Failed to set up neighbor advertiser slice, vip: {}, no response obtained'.format(ferret_service_vip))
-            return None
-        if response and not response.ok:
-            log_error('Failed to set up neighbor advertiser slice, vip: {}, error_code: {}, error_content: {}'.format(ferret_service_vip, response.status_code, response.content))
+            log_error("The request failed, vip: {}, error: {}".format(ferret_service_vip, e))
             return None
 
         neighbor_advertiser_configuration = json.loads(response.content)
@@ -364,15 +399,15 @@ def post_neighbor_advertiser_slice(ferret_service_vip):
 
         # Retry the request if the provided DIP is in the device VLAN
         if is_dip_in_device_vlan(ferret_server_ipv4_addr):
-            log_info('Failed to set up neighbor advertiser slice, vip: {}, dip {} is in device VLAN (attempt {}/{})'.format(ferret_service_vip, ferret_server_ipv4_addr, retry + 1, DEFAULT_FERRET_QUERY_RETRIES))
+            log_info("Failed to set up neighbor advertiser slice, vip: {}, dip {} is in device VLAN (attempt {}/{})".format(ferret_service_vip, ferret_server_ipv4_addr, retry + 1, DEFAULT_FERRET_QUERY_RETRIES))
             continue
 
         # If all the proceeding checks pass, return the provided DIP
         save_as_json(neighbor_advertiser_configuration, NEIGHBOR_ADVERTISER_RESPONSE_CONFIG_PATH)
-        log_info('Successfully set up neighbor advertiser slice, vip: {}, dip: {}'.format(ferret_service_vip, ferret_server_ipv4_addr))
+        log_info("Successfully set up neighbor advertiser slice, vip: {}, dip: {}".format(ferret_service_vip, ferret_server_ipv4_addr))
         return ferret_server_ipv4_addr
 
-    log_error('Failed to set up neighbor advertiser slice, vip: {}, returned dips were in device VLAN'.format(ferret_service_vip))
+    log_error("Failed to set up neighbor advertiser slice, vip: {}, returned dips were in device VLAN".format(ferret_service_vip))
     return None
 
 
@@ -442,6 +477,8 @@ def add_mirror_acl_rule():
 
 def set_mirror_tunnel(ferret_server_ip):
     add_mirror_session(ferret_server_ip)
+    # Ensure the mirror session is created before creating the rules
+    time.sleep(DEFAULT_CONFIG_DB_WAIT_TIME)
     add_mirror_acl_rule()
     log_info('Finish setting mirror tunnel; Ferret: {}'.format(ferret_server_ip))
 
@@ -466,6 +503,8 @@ def remove_mirror_acl_rule():
 
 def reset_mirror_tunnel():
     remove_mirror_acl_rule()
+    # Ensure the rules are removed before removing the mirror session
+    time.sleep(DEFAULT_CONFIG_DB_WAIT_TIME)
     remove_mirror_session()
     log_info('Finish resetting mirror tunnel')
 
@@ -508,7 +547,7 @@ def remove_vxlan_tunnel():
 
 
 def remove_vxlan_tunnel_map():
-    for (index, vlan_intf_name) in enumerate(get_vlan_interfaces(), 1):
+    for (index, _) in enumerate(get_vlan_interfaces(), 1):
         config_db.set_entry('VXLAN_TUNNEL_MAP', (VXLAN_TUNNEL_NAME, VXLAN_TUNNEL_MAP_PREFIX + str(index)), None)
 
 

@@ -141,7 +141,6 @@ function request_pre_shutdown()
     debug "Requesting pre-shutdown ..."
     /usr/bin/docker exec -i syncd /usr/bin/syncd_request_shutdown --pre &> /dev/null || {
         error "Failed to request pre-shutdown"
-        exit "${EXIT_SYNCD_SHUTDOWN}"
     }
 }
 
@@ -177,9 +176,9 @@ function wait_for_pre_shutdown_complete_or_fail()
 
     if [[ x"${STATE}" != x"pre-shutdown-succeeded" ]]; then
         debug "Syncd pre-shutdown failed: ${STATE} ..."
-        exit "${EXIT_SYNCD_SHUTDOWN}"
+    else
+        debug "Pre-shutdown succeeded ..."
     fi
-    debug "Pre-shutdown succeeded ..."
 }
 
 function backup_database()
@@ -396,6 +395,10 @@ if [[ "$REBOOT_TYPE" = "warm-reboot" || "$REBOOT_TYPE" = "fastfast-reboot" ]]; t
     fi
 fi
 
+# We are fully committed to reboot from this point on becasue critical
+# service will go down and we cannot recover from it.
+set +e
+
 # Kill radv before stopping BGP service to prevent annoucing our departure.
 debug "Stopping radv ..."
 docker kill radv &>/dev/null || [ $? == 1 ]
@@ -411,7 +414,7 @@ debug "Stopped  bgp ..."
 # We call `docker kill lldp` to ensure the container stops as quickly as possible,
 # then immediately call `systemctl stop lldp` to prevent the service from
 # restarting the container automatically.
-docker kill lldp > /dev/null
+docker kill lldp &> /dev/null || debug "Docker lldp is not running ($?) ..."
 systemctl stop lldp
 
 if [[ "$REBOOT_TYPE" = "fast-reboot" ]]; then
@@ -425,7 +428,7 @@ if [[ "$REBOOT_TYPE" = "fast-reboot" ]]; then
     while docker exec -i teamd pgrep teamd > /dev/null; do
       sleep 0.05
     done
-    docker kill teamd > /dev/null
+    docker kill teamd &> /dev/null || debug "Docker teamd is not running ($?) ..."
     systemctl stop teamd
     debug "Stopped teamd ..."
 fi
@@ -434,7 +437,7 @@ fi
 # We call `docker kill swss` to ensure the container stops as quickly as possible,
 # then immediately call `systemctl stop swss` to prevent the service from
 # restarting the container automatically.
-docker kill swss > /dev/null
+docker kill swss &> /dev/null || debug "Docker swss is not running ($?) ..."
 systemctl stop swss
 
 # Pre-shutdown syncd
@@ -468,7 +471,7 @@ if [[ "$REBOOT_TYPE" = "warm-reboot" || "$REBOOT_TYPE" = "fastfast-reboot" ]]; t
 fi
 
 debug "Stopping syncd ..."
-systemctl stop syncd
+systemctl stop syncd || debug "Ignore stopping syncd service error $?"
 debug "Stopped  syncd ..."
 
 # Kill other containers to make the reboot faster
@@ -479,7 +482,7 @@ debug "Stopping all remaining containers ..."
 for CONTAINER_NAME in $(docker ps --format '{{.Names}}'); do
     CONTAINER_STOP_RC=0
     docker kill $CONTAINER_NAME &> /dev/null || CONTAINER_STOP_RC=$?
-    systemctl stop $CONTAINER_NAME
+    systemctl stop $CONTAINER_NAME || debug "Ignore stopping $CONTAINER_NAME error $?"
     if [[ CONTAINER_STOP_RC -ne 0 ]]; then
         debug "Failed killing container $CONTAINER_NAME RC $CONTAINER_STOP_RC ."
     fi
@@ -487,12 +490,12 @@ done
 debug "Stopped all remaining containers ..."
 
 # Stop the docker container engine. Otherwise we will have a broken docker storage
-systemctl stop docker.service
+systemctl stop docker.service || debug "Ignore stopping docker service error $?"
 
 # Stop kernel modules for Nephos platform
 if [[ "$sonic_asic_type" = 'nephos' ]];
 then
-  systemctl stop nps-modules-`uname -r`.service
+  systemctl stop nps-modules-`uname -r`.service || debug "Ignore stopping nps service error $?"
 fi
 
 # Update the reboot cause file to reflect that user issued this script
@@ -508,6 +511,12 @@ sync
 # sync the current system time to CMOS
 if [ -x /sbin/hwclock ]; then
     /sbin/hwclock -w || /bin/true
+fi
+
+# Enable Watchdog Timer
+if [[ -x /usr/bin/watchdog ]]; then
+    debug "Enabling Watchdog before fast-reboot"
+    /usr/bin/watchdog -e
 fi
 
 # Reboot: explicity call Linux native reboot under sbin
