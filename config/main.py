@@ -1655,7 +1655,7 @@ def breakout(ctx, interface_name, mode, verbose, force_remove_dependencies, load
      Internal Function:  Check ASIC DB whether interfaces present or not
      ports: List of ports
      presence: If False, Make sure Ports are not present, return False otherwise.
-               If True, Make sure Ports are present, return True otherwise.
+               If True, Make sure Ports are present, return False otherwise.
     """
     def check_Ports_AsicDb(db, ports, presence, portMap):
 
@@ -1667,7 +1667,7 @@ def breakout(ctx, interface_name, mode, verbose, force_remove_dependencies, load
 
             for port in ports:
                 oid = portMap.get(port)
-                print("For Testing [Check Asic DB] {}:{}".format(port, oid))
+                #print("For Testing [Check Asic DB] {}:{}".format(port, oid))
                 # If Presence == False but entry exists, return False
                 if presence == False and oidDict.get(oid):
                     return False
@@ -1682,13 +1682,13 @@ def breakout(ctx, interface_name, mode, verbose, force_remove_dependencies, load
 
     MAX_WAIT = 60
     click.secho("\nVerify Port Deletion from Asic DB, Wait...", fg="cyan")
-    for waitTime in xrange(MAX_WAIT):
+    for waitTime in range(MAX_WAIT):
         if check_Ports_AsicDb(db=dataBase, ports=final_delPorts, \
             presence=False, portMap=if_name_map):
             break
         if waitTime == MAX_WAIT:
             click.secho("\nCritical Failure, Ports are not Deleted from \
-                Asic DB, Bail Out", fg="cyan")
+                ASIC DB, Bail Out", fg="cyan")
         time.sleep(1)
 
     """ Add ports with its attributes using configMgmt API """
