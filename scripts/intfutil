@@ -301,8 +301,12 @@ class IntfStatus(object):
         for i in appl_db_keys:
             key = re.split(':', i, maxsplit=1)[-1].strip()
             if key in front_panel_ports_list:
-                db_flap = long(appl_db_port_status_get(self.appl_db, key, PORT_FLAP_COUNTER))
-                cache_flap = long(cnstat_cached_dict[key].flap_counter)
+                try:
+                    db_flap = long(appl_db_port_status_get(self.appl_db, key, PORT_FLAP_COUNTER))
+                    cache_flap = long(cnstat_cached_dict[key].flap_counter)
+                except Exception as e:
+                    db_flap = 0
+                    cache_flap = 0
                 final_flap = str(db_flap - cache_flap)
                 table.append((key,
                               appl_db_port_status_get(self.appl_db, key, PORT_ADMIN_STATUS),
