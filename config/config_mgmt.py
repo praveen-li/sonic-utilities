@@ -43,6 +43,7 @@ class configMgmt():
             self.configdbJsonIn = None
             self.configdbJsonOut = None
             self.allowExtraTables = allowExtraTables
+            self.oidKey = 'ASIC_STATE:SAI_OBJECT_TYPE_PORT:oid:0x'
 
             self.DEBUG_FILE = None
             if debug:
@@ -129,43 +130,46 @@ class configMgmt():
         return
 
     """
-     Check ASIC DB whether interfaces present or not
+      Check if a key exists in ASIC DB or not.
+    """
+    def checkKeyinAsicDB(key):
+
+        self.logInFile('Check Key in Asic DB: {}'.format(key))
+        try:
+            # chk key in ASIC DB
+            if oid and db.exists('ASIC_DB', key):
+                return True
+        except Exception as e:
+            print(e)
+            raise(e)
+
+        return False
+
+    def testRedisCli(key):
+        # To Debug
+        if self.DEBUG_FILE:
+            cmd = 'sudo redis-cli -n 1 hgetall '"{}"'.format(key)
+            self.logInFile("Running {}".format(cmd))
+            print(cmd)
+            system(cmd)
+        return
+
+    """
+     Check ASIC DB for PORTs in port List
      ports: List of ports
      portMap: port to OID map.
-     Return: True if all ports are not present.
+     Return: True, if all ports are not present.
     """
-    def checkPortsInAsicDb(self, db, ports, portMap):
-
-        # internal funtions for better testing
-        def testAsicDB(oid):
-            # To Debug
-            if self.DEBUG_FILE:
-                cmd = 'sudo redis-cli -n 1 hgetall ' + \
-                '"ASIC_STATE:SAI_OBJECT_TYPE_PORT:oid:0x{}"'.format(oid)
-                print(cmd)
-                self.logInFile("Running {}".format(cmd))
-                system(cmd)
-            return
-
+    def checkNoPortsInAsicDb(self, db, ports, portMap):
         try:
             # connect to ASIC DB,
             db.connect(db.ASIC_DB)
-            oidKey = 'ASIC_STATE:SAI_OBJECT_TYPE_PORT:oid:0x'
-
             for port in ports:
-                portExist = True
-                # Get Oid
-                oid = portMap.get(port)
-                self.logInFile('Asic DB chk: port {} oid {}'.format(port, oid))
-                # chk oid in ASIC DB
-                if oid and not db.exists('ASIC_DB', oidKey + oid):
-                    portExist = False
-                    self.logInFile('Asic DB chk: port {} is not present'.format(\
-                        port, oid))
-                    testAsicDB(oid)
-
-                # Fail if any port Exist
-                if portExist:
+                key = self.oidKey + portMap[port]
+                if checkKeyinAsicDB(key) == False:
+                    # Test again via redis-cli
+                    testRedisCli(key)
+                else:
                     return False
 
         except Exception as e:
@@ -186,18 +190,21 @@ class configMgmt():
 
         try:
             for waitTime in range(timeout):
-                # checkPortsInAsicDb will return True only when all ports are not
-                # present
                 self.logInFile('Check Asic DB: {} try'.format(waitTime+1))
-                if self.checkPortsInAsicDb(db, ports, portMap):
+                # checkNoPortsInAsicDb will return True if all ports are not
+                # present in ASIC DB
+                if self.checkNoPortsInAsicDb(db, ports, portMap):
                     break
-                if waitTime + 1 == timeout:
-                    print("!!!  Critical Failure, Ports are not Deleted from \
-                        ASIC DB, Bail Out  !!!")
-                    self.logInFile("!!!  Critical Failure, Ports are not Deleted from \
-                        ASIC DB, Bail Out  !!!")
-                    raise(Exception("Ports are present in ASIC DB after timeout"))
                 tsleep(1)
+
+            # raise if timer expired
+            if waitTime + 1 == timeout:
+                print("!!!  Critical Failure, Ports are not Deleted from \
+                    ASIC DB, Bail Out  !!!")
+                self.logInFile("!!!  Critical Failure, Ports are not Deleted from \
+                    ASIC DB, Bail Out  !!!")
+                raise(Exception("Ports are present in ASIC DB after timeout"))
+
         except Exception as e:
             print(e)
             raise e
