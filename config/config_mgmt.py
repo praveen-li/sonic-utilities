@@ -137,7 +137,7 @@ class configMgmt():
         self.logInFile('Check Key in Asic DB: {}'.format(key))
         try:
             # chk key in ASIC DB
-            if oid and db.exists('ASIC_DB', key):
+            if db.exists('ASIC_DB', key):
                 return True
         except Exception as e:
             print(e)

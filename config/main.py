@@ -1624,10 +1624,8 @@ def breakout(ctx, interface_name, mode, verbose, force_remove_dependencies, load
 
         """ Delete all ports if forced else print dependencies using configMgmt API """
         final_delPorts = [intf for intf in del_intf_dict.keys()]
-        #delete_Ports(cm, final_delPorts, force_remove_dependencies, verbose)
         """ Add ports with its attributes using configMgmt API """
         final_addPorts = [intf for intf in port_dict.keys()]
-        #add_Ports(cm, final_addPorts, port_dict, load_predefined_config, verbose)
         portJson = dict(); portJson['PORT'] = port_dict
         # breakout_Ports will abort operation on failure, So no need to check return
         breakout_Ports(cm, delPorts=final_delPorts, addPorts = final_addPorts, \
