@@ -19,6 +19,7 @@ try:
     from time import sleep as tsleep
 
     import sonic_yang
+    import syslog
     import re
 
 except ImportError as e:
@@ -45,23 +46,19 @@ class configMgmt():
             self.allowExtraTables = allowExtraTables
             self.oidKey = 'ASIC_STATE:SAI_OBJECT_TYPE_PORT:oid:0x'
 
-            self.DEBUG_FILE = None
-            if debug:
-                self.DEBUG_FILE = '_debug_config_mgmt'
-                with open(self.DEBUG_FILE, 'a') as df:
-                    df.write('--- Start config_mgmt logging ---\n\n')
+            # logging vars
+            self.SYSLOG_IDENTIFIER = "config"
+            self.DEBUG = debug
 
             self.sy = sonic_yang.sonic_yang(YANG_DIR, debug=debug)
             # load yang models
             self.sy.loadYangModel()
-
             # load jIn from config DB or from config DB json file.
             if source.lower() == 'configdb':
                 self.readConfigDB()
             # treat any other source as file input
             else:
                 self.readConfigDBJson(source)
-
             # this will crop config, xlate and load.
             self.sy.load_data(self.configdbJsonIn, self.allowExtraTables)
 
@@ -71,18 +68,24 @@ class configMgmt():
 
         return
 
-    def logInFile(self, header="", obj=None, json=False):
+    def logInFile(self, msg=None, logLevel='INFO'):
 
-        if self.DEBUG_FILE:
-            with open(self.DEBUG_FILE, 'a') as df:
-                time = datetime.now()
-                df.write('\n\n{}: {}\n'.format(time, header))
-                if json:
-                    dump(obj, df, indent=4)
-                elif obj:
-                    #print(obj)
-                    df.write('{}: {}'.format(time, obj))
-                df.write('\n----')
+        logLevelMap= {'CRIT'  : syslog.LOG_CRIT,
+                      'ERR'   : syslog.LOG_ERR,
+                      'INFO'  : syslog.LOG_INFO,
+                      'DEBUG' : syslog.LOG_DEBUG
+                   }
+        # return if loglevel is DEBUG. but debug is not set
+        if logLevel == 'DEBUG' and self.DEBUG == False:
+            return
+        # default logLevel is INFO
+        if logLevelMap.get(logLevel) == None:
+            logLevel='INFO'
+
+        if msg:
+            syslog.openlog(self.SYSLOG_IDENTIFIER)
+            syslog.syslog(logLevelMap[logLevel], str(msg))
+            syslog.closelog()
 
         return
 
@@ -93,7 +96,7 @@ class configMgmt():
         #print(type(self.configdbJsonIn))
         if not self.configdbJsonIn:
             raise(Exception("Can not load config from config DB json file"))
-        self.logInFile('Reading Input', self.configdbJsonIn, True)
+        self.logInFile(msg='Reading Input {}'.format(self.configdbJsonIn))
 
         return
 
@@ -110,7 +113,8 @@ class configMgmt():
         configdb.connect()
         deep_update(data, FormatConverter.db_to_output(configdb.get_config()))
         self.configdbJsonIn =  FormatConverter.to_serialized(data)
-        #self.logInFile('Reading Input', self.configdbJsonIn, True)
+        self.logInFile(msg='Reading Input from ConfigDB {}'.\
+            format(self.configdbJsonIn), logLevel='DEBUG')
 
         return
 
@@ -124,7 +128,7 @@ class configMgmt():
         configdb.connect(False)
         deep_update(data, FormatConverter.to_deserialized(jDiff))
         data = sort_data(data)
-        self.logInFile("Write in DB: Last Data\n", data)
+        self.logInFile(msg="Write in DB: {}".format(data))
         configdb.mod_config(FormatConverter.output_to_db(data))
 
         return
@@ -134,7 +138,7 @@ class configMgmt():
     """
     def checkKeyinAsicDB(self, key, db):
 
-        self.logInFile('Check Key in Asic DB: {}'.format(key))
+        self.logInFile(msg='Check Key in Asic DB: {}'.format(key))
         try:
             # chk key in ASIC DB
             if db.exists('ASIC_DB', key):
@@ -147,9 +151,9 @@ class configMgmt():
 
     def testRedisCli(self, key):
         # To Debug
-        if self.DEBUG_FILE:
+        if self.DEBUG:
             cmd = 'sudo redis-cli -n 1 hgetall "{}"'.format(key)
-            self.logInFile("Running {}".format(cmd))
+            self.logInFile(msg="Running {}".format(cmd), logLevel='DEBUG')
             print(cmd)
             system(cmd)
         return
@@ -186,11 +190,11 @@ class configMgmt():
     def verifyAsicDB(self, db, ports, portMap, timeout):
 
         print("Verify Port Deletion from Asic DB, Wait...")
-        self.logInFile("Verify Port Deletion from Asic DB, Wait...")
+        self.logInFile(msg="Verify Port Deletion from Asic DB, Wait...")
 
         try:
             for waitTime in range(timeout):
-                self.logInFile('Check Asic DB: {} try'.format(waitTime+1))
+                self.logInFile(msg='Check Asic DB: {} try'.format(waitTime+1))
                 # checkNoPortsInAsicDb will return True if all ports are not
                 # present in ASIC DB
                 if self.checkNoPortsInAsicDb(db, ports, portMap):
@@ -201,8 +205,8 @@ class configMgmt():
             if waitTime + 1 == timeout:
                 print("!!!  Critical Failure, Ports are not Deleted from \
                     ASIC DB, Bail Out  !!!")
-                self.logInFile("!!!  Critical Failure, Ports are not Deleted from \
-                    ASIC DB, Bail Out  !!!")
+                self.logInFile(msg="!!!  Critical Failure, Ports are not Deleted from \
+                    ASIC DB, Bail Out  !!!", logLevel='CRIT')
                 raise(Exception("Ports are present in ASIC DB after timeout"))
 
         except Exception as e:
@@ -233,7 +237,8 @@ class configMgmt():
             # Save Port OIDs Mapping Before Deleting Port
             dataBase = SonicV2Connector(host="127.0.0.1")
             if_name_map, if_oid_map = port_util.get_interface_oid_map(dataBase)
-            self.logInFile('if_name_map', obj=if_name_map, json=True)
+            self.logInFile(msg='if_name_map {}'.format(if_name_map), \
+                logLevel='DEBUG')
 
             # If we are here, then get ready to update the Config DB, Update
             # deletion of Config first, then verify in Asic DB for port deletion,
@@ -263,7 +268,7 @@ class configMgmt():
 
         configToLoad = None; deps = None
         try:
-            self.logInFile("delPorts ports:{} force:{}".format(ports, force))
+            self.logInFile(msg="delPorts ports:{} force:{}".format(ports, force))
 
             print('\nStart Port Deletion')
             deps = list()
@@ -272,13 +277,11 @@ class configMgmt():
             for port in ports:
                 xPathPort = self.sy.findXpathPortLeaf(port)
                 print('Find dependecies for port {}'.format(port))
-                self.logInFile('Find dependecies for port {}'.format(port))
+                self.logInFile(msg='Find dependecies for port {}'.format(port))
                 # print("Generated Xpath:" + xPathPort)
                 dep = self.sy.find_data_dependencies(str(xPathPort))
                 if dep:
                     deps.extend(dep)
-            self.logInFile('Dependencies', deps)
-
 
             # No further action with no force and deps exist
             if force == False and deps:
@@ -288,7 +291,7 @@ class configMgmt():
             # of deps fails, return immediately
             elif deps and force:
                 for dep in deps:
-                    self.logInFile('Deleting', dep)
+                    self.logInFile(msg='Deleting', obj=dep)
                     self.sy.delete_node(str(dep))
             # mark deps as None now,
             deps = None
@@ -297,7 +300,7 @@ class configMgmt():
             for port in ports:
                 xPathPort = self.sy.findXpathPort(port)
                 print("Deleting Port: " + port)
-                self.logInFile('Deleting Port:{}'.format(port), xPathPort)
+                self.logInFile(msg='Deleting Port:{}'.format(port))
                 self.sy.delete_node(str(xPathPort))
 
             # Let`s Validate the tree now
@@ -330,18 +333,17 @@ class configMgmt():
 
         configToLoad = None
         try:
-            self.logInFile('\nStart Port Addition')
-            self.logInFile("addPorts ports:{} loadDefConfig:{}".format(ports, loadDefConfig))
-            self.logInFile("addPorts Args portjson: ", portJson)
+            self.logInFile(msg='Start Port Addition')
+            self.logInFile(msg="addPorts ports:{} loadDefConfig:{}".\
+                format(ports, loadDefConfig))
+            self.logInFile(msg="addPorts Args portjson {}".format(portJson))
 
             print('\nStart Port Addition')
             # get default config if forced
             defConfig = dict()
             if loadDefConfig:
                 defConfig = self.getDefaultConfig(ports)
-                self.logInFile('Default Config for {}'.format(ports), \
-                    defConfig, json=True)
-            #prtprint(defConfig)
+                self.logInFile(msg='Default Config for {}'.format(ports))
 
             # get the latest Data Tree, save this in input config, since this
             # is our starting point now
@@ -357,7 +359,7 @@ class configMgmt():
             # We do not allow new table merge while adding default config.
             if loadDefConfig:
                 print("Merge Default Config for {}".format(ports))
-                self.logInFile("Merge Default Config for {}".format(ports))
+                self.logInFile(msg="Merge Default Config for {}".format(ports))
                 self.mergeConfigs(self.configdbJsonOut, defConfig, True)
 
             # create a tree with merged config and validate, if validation is
@@ -384,11 +386,11 @@ class configMgmt():
         try:
             self.sy.validate_data_tree()
         except Exception as e:
-            self.logInFile('Data Validation Failed')
+            self.logInFile(msg='Data Validation Failed')
             return False
 
         print('Data Validation successful')
-        self.logInFile('Data Validation successful')
+        self.logInFile(msg='Data Validation successful')
         return True
 
     """
@@ -511,7 +513,6 @@ class configMgmt():
             # Process diff and create Config which can be updated in Config DB
             configToLoad = self.createConfigToLoad(configDBdiff, \
                 self.configdbJsonIn, self.configdbJsonOut)
-            self.logInFile("Config Diff to Load: {}", configToLoad, True)
 
         except Exception as e:
             print("Update to Config DB Failed")
