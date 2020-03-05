@@ -330,7 +330,7 @@ class configMgmt():
             defConfig = dict()
             if loadDefConfig:
                 defConfig = self.getDefaultConfig(ports)
-                syslog.syslog('Default Config for {}'.format(ports))
+                syslog.syslog('Default Config: {}'.format(defConfig))
 
             # get the latest Data Tree, save this in input config, since this
             # is our starting point now
@@ -760,7 +760,7 @@ def testRun_Delete_Add_Port(cmode, nmode, loadDef):
 
     except Exception as e:
         print(e)
-        print("\n***Port Breal Out Test Failed***\n")
+        print("\n***Port Break Out Test Failed***\n")
         return
 
     return
