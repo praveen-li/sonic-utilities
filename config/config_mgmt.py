@@ -47,13 +47,8 @@ class configMgmt():
             self.oidKey = 'ASIC_STATE:SAI_OBJECT_TYPE_PORT:oid:0x'
 
             # logging vars
-            syslog.openlog("config")
+            self.SYSLOG_IDENTIFIER = "configMgmt"
             self.DEBUG = debug
-            if self.DEBUG:
-                syslog.setlogmask(syslog.LOG_UPTO(syslog.LOG_DEBUG))
-            else:
-                syslog.setlogmask(syslog.LOG_UPTO(syslog.LOG_INFO))
-
 
             self.sy = sonic_yang.sonic_yang(YANG_DIR, debug=debug)
             # load yang models
@@ -74,7 +69,17 @@ class configMgmt():
         return
 
     def __del__(self):
+        pass
+
+    def sysLog(self, debug=syslog.LOG_INFO, msg=None):
+
+        # log debug only if enabled
+        if self.DEBUG == False and debug == syslog.LOG_DEBUG:
+            return
+        syslog.openlog(self.SYSLOG_IDENTIFIER)
+        syslog.syslog(debug, msg)
         syslog.closelog()
+
         return
 
     def readConfigDBJson(self, source=CONFIG_DB_JSON_FILE):
@@ -84,7 +89,7 @@ class configMgmt():
         #print(type(self.configdbJsonIn))
         if not self.configdbJsonIn:
             raise(Exception("Can not load config from config DB json file"))
-        syslog.syslog('Reading Input {}'.format(self.configdbJsonIn))
+        self.sysLog(msg='Reading Input {}'.format(self.configdbJsonIn))
 
         return
 
@@ -101,7 +106,7 @@ class configMgmt():
         configdb.connect()
         deep_update(data, FormatConverter.db_to_output(configdb.get_config()))
         self.configdbJsonIn =  FormatConverter.to_serialized(data)
-        syslog.syslog(syslog.LOG_DEBUG, 'Reading Input from ConfigDB {}'.\
+        self.sysLog(syslog.LOG_DEBUG, 'Reading Input from ConfigDB {}'.\
             format(self.configdbJsonIn))
 
         return
@@ -116,7 +121,7 @@ class configMgmt():
         configdb.connect(False)
         deep_update(data, FormatConverter.to_deserialized(jDiff))
         data = sort_data(data)
-        syslog.syslog("Write in DB: {}".format(data))
+        self.sysLog(msg="Write in DB: {}".format(data))
         configdb.mod_config(FormatConverter.output_to_db(data))
 
         return
@@ -126,7 +131,7 @@ class configMgmt():
     """
     def checkKeyinAsicDB(self, key, db):
 
-        syslog.syslog('Check Key in Asic DB: {}'.format(key))
+        self.sysLog(msg='Check Key in Asic DB: {}'.format(key))
         try:
             # chk key in ASIC DB
             if db.exists('ASIC_DB', key):
@@ -141,7 +146,7 @@ class configMgmt():
         # To Debug
         if self.DEBUG:
             cmd = 'sudo redis-cli -n 1 hgetall "{}"'.format(key)
-            syslog.syslog(syslog.LOG_DEBUG, "Running {}".format(cmd))
+            self.sysLog(syslog.LOG_DEBUG, "Running {}".format(cmd))
             print(cmd)
             system(cmd)
         return
@@ -178,11 +183,11 @@ class configMgmt():
     def verifyAsicDB(self, db, ports, portMap, timeout):
 
         print("Verify Port Deletion from Asic DB, Wait...")
-        syslog.syslog("Verify Port Deletion from Asic DB, Wait...")
+        self.sysLog(msg="Verify Port Deletion from Asic DB, Wait...")
 
         try:
             for waitTime in range(timeout):
-                syslog.syslog('Check Asic DB: {} try'.format(waitTime+1))
+                self.sysLog(msg='Check Asic DB: {} try'.format(waitTime+1))
                 # checkNoPortsInAsicDb will return True if all ports are not
                 # present in ASIC DB
                 if self.checkNoPortsInAsicDb(db, ports, portMap):
@@ -193,7 +198,7 @@ class configMgmt():
             if waitTime + 1 == timeout:
                 print("!!!  Critical Failure, Ports are not Deleted from \
                     ASIC DB, Bail Out  !!!")
-                syslog.syslog(syslog.LOG_CRIT, "!!!  Critical Failure, Ports \
+                self.sysLog(syslog.LOG_CRIT, "!!!  Critical Failure, Ports \
                     are not Deleted from ASIC DB, Bail Out  !!!")
                 raise(Exception("Ports are present in ASIC DB after timeout"))
 
@@ -225,7 +230,7 @@ class configMgmt():
             # Save Port OIDs Mapping Before Deleting Port
             dataBase = SonicV2Connector(host="127.0.0.1")
             if_name_map, if_oid_map = port_util.get_interface_oid_map(dataBase)
-            syslog.syslog(syslog.LOG_DEBUG, 'if_name_map {}'.format(if_name_map))
+            self.sysLog(syslog.LOG_DEBUG, 'if_name_map {}'.format(if_name_map))
 
             # If we are here, then get ready to update the Config DB, Update
             # deletion of Config first, then verify in Asic DB for port deletion,
@@ -255,7 +260,7 @@ class configMgmt():
 
         configToLoad = None; deps = None
         try:
-            syslog.syslog("delPorts ports:{} force:{}".format(ports, force))
+            self.sysLog(msg="delPorts ports:{} force:{}".format(ports, force))
 
             print('\nStart Port Deletion')
             deps = list()
@@ -264,7 +269,7 @@ class configMgmt():
             for port in ports:
                 xPathPort = self.sy.findXpathPortLeaf(port)
                 print('Find dependecies for port {}'.format(port))
-                syslog.syslog('Find dependecies for port {}'.format(port))
+                self.sysLog(msg='Find dependecies for port {}'.format(port))
                 # print("Generated Xpath:" + xPathPort)
                 dep = self.sy.find_data_dependencies(str(xPathPort))
                 if dep:
@@ -278,7 +283,7 @@ class configMgmt():
             # of deps fails, return immediately
             elif deps and force:
                 for dep in deps:
-                    syslog.syslog('Deleting {}'.format(dep))
+                    self.sysLog(msg='Deleting {}'.format(dep))
                     self.sy.delete_node(str(dep))
             # mark deps as None now,
             deps = None
@@ -287,7 +292,7 @@ class configMgmt():
             for port in ports:
                 xPathPort = self.sy.findXpathPort(port)
                 print("Deleting Port: " + port)
-                syslog.syslog('Deleting Port:{}'.format(port))
+                self.sysLog(msg='Deleting Port:{}'.format(port))
                 self.sy.delete_node(str(xPathPort))
 
             # Let`s Validate the tree now
@@ -320,17 +325,17 @@ class configMgmt():
 
         configToLoad = None
         try:
-            syslog.syslog('Start Port Addition')
-            syslog.syslog("addPorts ports:{} loadDefConfig:{}".\
+            self.sysLog(msg='Start Port Addition')
+            self.sysLog(msg="addPorts ports:{} loadDefConfig:{}".\
                 format(ports, loadDefConfig))
-            syslog.syslog("addPorts Args portjson {}".format(portJson))
+            self.sysLog(msg="addPorts Args portjson {}".format(portJson))
 
             print('\nStart Port Addition')
             # get default config if forced
             defConfig = dict()
             if loadDefConfig:
                 defConfig = self.getDefaultConfig(ports)
-                syslog.syslog('Default Config: {}'.format(defConfig))
+                self.sysLog(msg='Default Config: {}'.format(defConfig))
 
             # get the latest Data Tree, save this in input config, since this
             # is our starting point now
@@ -346,7 +351,7 @@ class configMgmt():
             # We do not allow new table merge while adding default config.
             if loadDefConfig:
                 print("Merge Default Config for {}".format(ports))
-                syslog.syslog("Merge Default Config for {}".format(ports))
+                self.sysLog(msg="Merge Default Config for {}".format(ports))
                 self.mergeConfigs(self.configdbJsonOut, defConfig, True)
 
             # create a tree with merged config and validate, if validation is
@@ -373,11 +378,11 @@ class configMgmt():
         try:
             self.sy.validate_data_tree()
         except Exception as e:
-            syslog.syslog('Data Validation Failed')
+            self.sysLog(msg='Data Validation Failed')
             return False
 
         print('Data Validation successful')
-        syslog.syslog('Data Validation successful')
+        self.sysLog(msg='Data Validation successful')
         return True
 
     """
