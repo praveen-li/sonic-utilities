@@ -88,6 +88,7 @@ setup(
         'scripts/portstat.py',
 	'scripts/syslog_helper.py',
         'scripts/nbrshow',
+        'scripts/update_json.py',
         'scripts/warm-reboot',
         'scripts/watchdog',
         'scripts/watermarkstat',
