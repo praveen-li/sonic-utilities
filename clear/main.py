@@ -182,9 +182,13 @@ elif routing_stack == "frr":
 
 
 @cli.command()
-def counters():
+@click.argument('interfacename', required=False)
+def counters(interfacename):
     """Clear counters"""
-    command = "portstat -c"
+    if interfacename is not None:
+        command = "portstat -c -P {}".format(interfacename)
+    else:
+        command = "portstat -c"
     run_command(command)
 
 @cli.command()

@@ -21,8 +21,7 @@ import time
 from collections import namedtuple, OrderedDict
 from natsort import natsorted
 from tabulate import tabulate
-from fcntl import flock, LOCK_EX, LOCK_NB
-
+from fcntl import flock, LOCK_EX, LOCK_NB, LOCK_UN
 
 PORT_RATE = 40
 
@@ -357,6 +356,27 @@ class Portstat(object):
         cnstat_fqn_file = self.cnstat_dir + "/" + cnstat_file
         return cnstat_fqn_file
 
+    def _lock_file(self, f):
+        """ Lock the file using fnctl which manages file descriptors """
+        try:
+            # do not block forever, allow user to try again
+            flock(f, LOCK_EX|LOCK_NB)
+        except IOError as e:
+            print("flock() failed to hold an exclusive lock.")
+            f.close()
+            sys.exit(e.errno)
+
+    def _unlock_file(self, f):
+        """ Unlock the file using fnctl which manages file descriptors """
+        try:
+            f.flush()
+            os.fsync(f.fileno())
+            flock(f, LOCK_UN)
+        except IOError as e:
+            print("flock() failed to unlock file.")
+            f.close()
+            sys.exit(e.errno)
+
 
 def main():
     parser  = argparse.ArgumentParser(description='Display the ports state and counters',
@@ -366,6 +386,7 @@ def main():
 Port state: (U)-Up (D)-Down (X)-Disabled
 Examples:
   portstat -c -t test
+  portstat -c -P Ethernet112
   portstat -t test
   portstat -d -t test
   portstat
@@ -375,6 +396,7 @@ Examples:
 """)
 
     parser.add_argument('-c', '--clear', action='store_true', help='Copy & clear stats')
+    parser.add_argument('-P', '--port-clear', type=str, help='Copy and Clear stats for just one port', default=None)
     parser.add_argument('-d', '--delete', action='store_true', help='Delete saved stats, either the uid or the specified tag')
     parser.add_argument('-D', '--delete-all', action='store_true', help='Delete all saved stats')
     parser.add_argument('-j', '--json', action='store_true', help='Display in JSON format')
@@ -393,6 +415,7 @@ Examples:
     uid = str(os.getuid())
     wait_time_in_seconds = args.period
     print_all = args.all
+    portClear = args.port_clear
 
     portstat = Portstat()
 
@@ -446,22 +469,39 @@ Examples:
             print e.errno, e
             sys.exit(1)
 
-
     if save_fresh_stats:
         if uid is not '0':
             print("Permission Denied, Please run as root/sudo")
-            sys.exit(ERR_PER_DEN);
+            sys.exit(ERR_PER_DEN)
         try:
-            cnstat_fqn_fd = open(cnstat_fqn_file, 'w')
-            try:
-                # do not block forever, allow user to try again
-                flock(cnstat_fqn_fd, LOCK_EX|LOCK_NB)
-            except IOError as e:
-                print("Counters are being cleared by others, Try again")
-                cnstat_fqn_fd.close()
-                sys.exit(e.errno)
+            # Open the file with 'rw' mode
+            cnstat_fqn_fd = open(cnstat_fqn_file, 'r+')
 
-            pickle.dump(cnstat_dict, cnstat_fqn_fd)
+            # Lock the file
+            portstat._lock_file(cnstat_fqn_fd)
+
+            # Copy and Clear stats for all ports
+            if portClear is None:
+                pickle.dump(cnstat_dict, cnstat_fqn_fd)
+
+            # Copy and Clear stats for user-selected port
+            else:
+                cnstat_dict_port = OrderedDict()
+
+                # At this point, we'll read the contents and keep it in a dictionary.
+                cnstat_dict_port = pickle.load(cnstat_fqn_fd)
+
+                # we'll update only the content of the user-selected port.
+                cnstat_dict_port[portClear] = cnstat_dict[portClear]
+
+                # Reposition pointer at the beginning of the fileonce again
+                position = cnstat_fqn_fd.seek(0, 0)
+
+                # Dump the updated dictionary to the file
+                pickle.dump(cnstat_dict_port, cnstat_fqn_fd)
+
+            # Unlock the file
+            portstat._unlock_file(cnstat_fqn_fd)
             cnstat_fqn_fd.close()
 
         except IOError as e:
