@@ -612,7 +612,7 @@ def is_ipaddress(val):
     return True
 
 # class for locking entire config process
-class configdblock():
+class ConfigDbLock():
     def __init__(self):
         self.lockName = "LOCK|configDbLock"
         self.timeout = 10
@@ -704,7 +704,7 @@ class configdblock():
         return
 # end of class configdblock
 
-cdblock = configdblock()
+cdblock = ConfigDbLock()
 # This is our main entrypoint - the main 'config' command
 @click.group(context_settings=CONTEXT_SETTINGS)
 def config():
