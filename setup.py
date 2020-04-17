@@ -16,12 +16,6 @@ except ImportError:
 
 import glob
 from setuptools import setup
-import unittest
-
-def get_test_suite():
-    test_loader = unittest.TestLoader()
-    test_suite = test_loader.discover('sonic-utilities-tests', pattern='*.py')
-    return test_suite
 
 setup(
     name='sonic-utilities',
@@ -44,17 +38,24 @@ setup(
         'debug',
         'pfcwd',
         'sfputil',
+        'ssdutil',
         'pfc',
         'psuutil',
 	'sensorutil',
+        'fwutil',
+        'pddf_fanutil',
+        'pddf_psuutil',
+        'pddf_thermalutil',
+        'pddf_ledutil',
         'show',
         'sonic_installer',
         'sonic-utilities-tests',
         'undebug',
+        'utilities_common',
     ],
     package_data={
         'show': ['aliases.ini'],
-        'sonic-utilities-tests': ['acl_input/*'],
+        'sonic-utilities-tests': ['acl_input/*', 'mock_tables/*.py', 'mock_tables/*.json']
     },
     scripts=[
         'scripts/aclshow',
@@ -65,15 +66,23 @@ setup(
         'scripts/db_migrator.py',
         'scripts/decode-syseeprom',
         'scripts/dropcheck',
+        'scripts/dropconfig',
+        'scripts/dropstat',
+        'scripts/dump_nat_entries.py',
         'scripts/ecnconfig',
-        'scripts/mmuconfig',
+        'scripts/fanshow',
         'scripts/fast-reboot',
         'scripts/fast-reboot-dump.py',
         'scripts/fdbclear',
         'scripts/fdbshow',
         'scripts/generate_dump',
         'scripts/intfutil',
+        'scripts/intfstat',
         'scripts/lldpshow',
+        'scripts/mmuconfig',
+        'scripts/natclear',
+        'scripts/natconfig',
+        'scripts/natshow',
         'scripts/nbrshow',
         'scripts/neighbor_advertiser',
         'scripts/pcmping',
@@ -81,13 +90,19 @@ setup(
         'scripts/portconfig',
         'scripts/portstat',
         'scripts/pfcstat',
+        'scripts/psushow',
         'scripts/queuestat',
         'scripts/reboot',
+        'scripts/route_check.py',
+        'scripts/route_check_test.sh',
+        'scripts/sfpshow',
+        'scripts/syseeprom-to-json',
         'scripts/teamshow',
         'scripts/config-hwsku.sh',
         'scripts/portstat.py',
 	'scripts/syslog_helper.py',
         'scripts/nbrshow',
+        'scripts/tempershow',
         'scripts/update_json.py',
         'scripts/warm-reboot',
         'scripts/watchdog',
@@ -108,9 +123,15 @@ setup(
             'debug = debug.main:cli',
             'pfcwd = pfcwd.main:cli',
             'sfputil = sfputil.main:cli',
+            'ssdutil = ssdutil.main:ssdutil',
             'pfc = pfc.main:cli',
             'psuutil = psuutil.main:cli',
             'sensorutil = sensorutil.main:cli',
+            'fwutil = fwutil.main:cli',
+            'pddf_fanutil = pddf_fanutil.main:cli',
+            'pddf_psuutil = pddf_psuutil.main:cli',
+            'pddf_thermalutil = pddf_thermalutil.main:cli',
+            'pddf_ledutil = pddf_ledutil.main:cli',
             'show = show.main:cli',
             'sonic-clear = clear.main:cli',
             'sonic_installer = sonic_installer.main:cli',
@@ -131,6 +152,14 @@ setup(
         'click',
         'natsort',
         'tabulate'
+    ],
+    setup_requires= [
+        'pytest-runner'
+    ],
+    tests_require = [
+        'pytest',
+        'mock>=2.0.0',
+        'mockredispy>=2.9.3'
     ],
     classifiers=[
         'Development Status :: 3 - Alpha',

@@ -13,6 +13,9 @@ STRICT=no
 REBOOT_METHOD="/sbin/kexec -e"
 ASSISTANT_IP_LIST=""
 ASSISTANT_SCRIPT="/usr/bin/neighbor_advertiser"
+DEVPATH="/usr/share/sonic/device"
+PLATFORM=$(sonic-cfggen -H -v DEVICE_METADATA.localhost.platform)
+PLATFORM_PLUGIN="${REBOOT_TYPE}_plugin"
 
 # Require 100M available on the hard drive for warm reboot temp files,
 # Size is in 1K blocks:
@@ -313,6 +316,9 @@ case "$REBOOT_TYPE" in
             # source mlnx-ffb.sh file with
             # functions to check ISSU upgrade possibility
             source mlnx-ffb.sh
+        elif [[ "$sonic_asic_type" == "barefoot" ]]; then
+            REBOOT_TYPE="fastfast-reboot"
+            BOOT_TYPE_ARG="fastfast"
         else
             BOOT_TYPE_ARG="warm"
         fi
@@ -398,6 +404,13 @@ fi
 # We are fully committed to reboot from this point on becasue critical
 # service will go down and we cannot recover from it.
 set +e
+
+# Kill nat docker after saving the conntrack table
+debug "Stopping nat ..."
+/usr/bin/dump_nat_entries.py
+docker kill nat > /dev/null || true
+systemctl stop nat
+debug "Stopped nat ..."
 
 # Kill radv before stopping BGP service to prevent annoucing our departure.
 debug "Stopping radv ..."
@@ -514,10 +527,9 @@ if [ -x /sbin/hwclock ]; then
     /sbin/hwclock -w || /bin/true
 fi
 
-# Enable Watchdog Timer
-if [[ -x /usr/bin/watchdog ]]; then
-    debug "Enabling Watchdog before ${REBOOT_TYPE}"
-    /usr/bin/watchdog -e
+if [ -x ${DEVPATH}/${PLATFORM}/${PLATFORM_PLUGIN} ]; then
+    debug "Running ${PLATFORM} specific plugin..."
+    ${DEVPATH}/${PLATFORM}/${PLATFORM_PLUGIN}
 fi
 
 # Reboot: explicity call Linux native reboot under sbin

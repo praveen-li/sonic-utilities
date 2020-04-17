@@ -130,12 +130,37 @@ save_ip() {
 #  None
 ###############################################################################
 save_bgp_neighbor() {
-    neighbor_list=`vtysh -c "show ip bgp neighbors" | grep "BGP neighbor is" | awk -F '[, ]' '{print $4}'`
-    for word in $neighbor_list; do
+    neighbor_list_v4=$(vtysh -c "show ip bgp neighbors" | grep "BGP neighbor is" | awk -F '[, ]' '{print $4}')
+    for word in $neighbor_list_v4; do
         save_vtysh "show ip bgp neighbors $word advertised-routes" "ip.bgp.neighbor.$word.adv"
         save_vtysh "show ip bgp neighbors $word routes" "ip.bgp.neighbor.$word.rcv"
     done
+    neighbor_list_v6=$(vtysh -c "show bgp ipv6 neighbors" | grep "BGP neighbor is" | awk -F '[, ]' '{print $4}' | fgrep ':')
+    for word in $neighbor_list_v6; do
+        save_vtysh "show bgp ipv6 neighbors $word advertised-routes" "ipv6.bgp.neighbor.$word.adv"
+        save_vtysh "show bgp ipv6 neighbors $word routes" "ipv6.bgp.neighbor.$word.rcv"
+    done
 }
+
+###############################################################################
+# Dump the nat config, iptables rules and conntrack nat entries
+# Globals:
+#  None
+# Arguments:
+#  None
+# Returns:
+#  None
+###############################################################################
+save_nat_info() {
+    save_cmd "iptables -t nat -nv -L" "nat.iptables"
+    save_cmd "conntrack -j -L" "nat.conntrack"
+    save_cmd "conntrack -j -L | wc" "nat.conntrackcount"
+    save_cmd "conntrack -L" "nat.conntrackall"
+    save_cmd "conntrack -L | wc" "nat.conntrackallcount"
+    save_cmd "show nat config" "nat.config"
+}
+
+###############################################################################
 
 ###############################################################################
 # Given list of proc files, saves proc files to tar.
@@ -251,7 +276,7 @@ find_files() {
 #  None
 ###############################################################################
 disable_logrotate() {
-    sed -i '/logrotate/s/^/#/g' /etc/cron.d/logrotate
+    sed -i '/\/usr\/sbin\/logrotate/s/^/#/g' /etc/cron.d/logrotate
 }
 
 ###############################################################################
@@ -264,7 +289,7 @@ disable_logrotate() {
 #  None
 ###############################################################################
 enable_logrotate() {
-    sed -i '/logrotate/s/^#*//g' /etc/cron.d/logrotate
+    sed -i '/\/usr\/sbin\/logrotate/s/^#*//g' /etc/cron.d/logrotate
 }
 
 ###############################################################################
@@ -324,6 +349,9 @@ main() {
     save_vtysh "show ip bgp summary" "bgp.summary"
     save_vtysh "show ip bgp neighbors" "bgp.neighbors"
     save_vtysh "show ip bgp" "bgp.table" true
+    save_vtysh "show bgp ipv6 summary" "bgp.ipv6.summary"
+    save_vtysh "show bgp ipv6 neighbors" "bgp.ipv6.neighbors"
+    save_vtysh "show bgp ipv6" "bgp.ipv6.table" true
     save_bgp_neighbor
 
     save_cmd "show interface status" "interface.status"
@@ -341,6 +369,8 @@ main() {
     save_cmd "mount" "mount"
     save_cmd "df" "df"
     save_cmd "dmesg" "dmesg"
+
+    save_nat_info
 
     save_redis "0" "APP_DB"
     save_redis "1" "ASIC_DB"
@@ -371,6 +401,8 @@ main() {
         save_cmd "bcmcmd -t5 version" "broadcom.version"
         save_cmd "bcmcmd -t5 soc" "broadcom.soc"
         save_cmd "bcmcmd -t5 ps" "broadcom.ps"
+        save_cmd "bcmcmd \"l3 nat_ingress show\"" "broadcom.nat.ingress"
+        save_cmd "bcmcmd \"l3 nat_egress show\"" "broadcom.nat.egress"
     fi
 
     if $GREP -qi "aboot_platform=.*arista" /host/machine.conf; then

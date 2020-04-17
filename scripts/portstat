@@ -10,7 +10,6 @@ import argparse
 import cPickle as pickle
 import datetime
 import getopt
-import json
 import os.path
 import re
 import subprocess
@@ -22,6 +21,7 @@ from collections import namedtuple, OrderedDict
 from natsort import natsorted
 from tabulate import tabulate
 from fcntl import flock, LOCK_EX, LOCK_NB, LOCK_UN
+from utilities_common.netstat import ns_diff, ns_brate, ns_prate, ns_util, table_as_json
 
 PORT_RATE = 40
 
@@ -58,6 +58,7 @@ PORT_OPER_STATUS_FIELD = "oper_status"
 PORT_ADMIN_STATUS_FIELD = "admin_status"
 PORT_STATUS_VALUE_UP = 'UP'
 PORT_STATUS_VALUE_DOWN = 'DOWN'
+PORT_SPEED_FIELD = "speed"
 
 PORT_STATE_UP = 'U'
 PORT_STATE_DOWN = 'D'
@@ -132,6 +133,19 @@ class Portstat(object):
             cnstat_dict[port] = get_counters(port, counter_port_name_map[port])
         return cnstat_dict
 
+    def get_port_speed(self, port_name):
+        """
+            Get the port speed
+        """
+        # Get speed from APPL_DB
+        full_table_id = PORT_STATUS_TABLE_PREFIX + port_name
+        speed = self.db.get(self.db.APPL_DB, full_table_id, PORT_SPEED_FIELD)
+        if speed is None:
+            speed = PORT_RATE
+        else:
+            speed = int(speed)/1000
+        return speed
+
     def get_port_state(self, port_name):
         """
             Get the port state
@@ -161,25 +175,6 @@ class Portstat(object):
 	else:
 	     return int(port_speed)
 
-    def table_as_json(self, table, print_all):
-        """
-            Print table as json format.
-        """
-        output = {}
-
-        # Build a dictionary where the if_name is the key and the value is
-        # a dictionary that holds MTU, TX_DRP, etc
-        if print_all:
-            for line in table:
-                if_name = line[0]
-                output[if_name] = {header_all[i]: line[i] for i in range(1, len(header_all))}
-        else:
-            for line in table:
-                if_name = line[0]
-                output[if_name] = {header[i]: line[i] for i in range(1, len(header))}
-
-        return json.dumps(output, indent=4, sort_keys=True)
-
     def cnstat_print(self, cnstat_dict, use_json, print_all):
         """
             Print the cnstat.
@@ -205,66 +200,14 @@ class Portstat(object):
 
 
         if use_json:
-            print self.table_as_json(table, print_all)
-
+            print table_as_json(table, header_all if print_all else header)
         else:
-            if print_all:
-                print tabulate(table, header_all, tablefmt='simple', stralign='right')
-            else:
-                print tabulate(table, header, tablefmt='simple', stralign='right')
+            print tabulate(table, header_all if print_all else header, tablefmt='simple', stralign='right')
 
     def cnstat_diff_print(self, cnstat_new_dict, cnstat_old_dict, use_json, print_all):
         """
             Print the difference between two cnstat results.
         """
-        def ns_diff(newstr, oldstr):
-            """
-                Calculate the diff.
-            """
-            if newstr == STATUS_NA or oldstr == STATUS_NA:
-                return STATUS_NA
-            else:
-                new, old = int(newstr), int(oldstr)
-                return '{:,}'.format(new - old)
-
-        def ns_brate(newstr, oldstr, delta):
-            """
-                Calculate the byte rate.
-            """
-            if newstr == STATUS_NA or oldstr == STATUS_NA:
-                return STATUS_NA
-            else:
-                rate = int(ns_diff(newstr, oldstr).replace(',',''))/delta
-                if rate > 1024*1024*10:
-                    rate = "{:.2f}".format(rate/1024/1024)+' MB'
-                elif rate > 1024*10:
-                    rate = "{:.2f}".format(rate/1024)+' KB'
-                else:
-                    rate = "{:.2f}".format(rate)+' B'
-                return rate+'/s'
-
-        def ns_prate(newstr, oldstr, delta):
-            """
-                Calculate the packet rate.
-            """
-            if newstr == STATUS_NA or oldstr == STATUS_NA:
-                return STATUS_NA
-            else:
-                rate = int(ns_diff(newstr, oldstr).replace(',',''))/delta
-                return "{:.2f}".format(rate)+'/s'
-
-        def ns_util(newstr, oldstr, delta, key):
-            """
-                Calculate the util.
-            """
-            if newstr == STATUS_NA or oldstr == STATUS_NA:
-                return STATUS_NA
-            else:
-                rate = int(ns_diff(newstr, oldstr).replace(',',''))/delta
-                # get_port_speed() returns speed in MB, so use 1O^6 (not 2^20)
-                # in utilization calculation.
-                util = rate/(self.get_port_speed(key)*1000*1000/8.0)*100
-                return "{:.2f}%".format(util)
 
         table = []
         default_cntr = NStats._make(list("0" * FIELD_COUNT))
@@ -280,20 +223,21 @@ class Portstat(object):
             else:
 		old_cntr = default_cntr
 
+            port_speed = self.get_port_speed(key)
             if print_all:
                 if old_cntr is not None:
                     table.append((key, self.get_port_state(key),
                                   ns_diff(cntr.rx_ok, old_cntr.rx_ok),
                                   ns_brate(cntr.rx_byt, old_cntr.rx_byt, time_gap),
                                   ns_prate(cntr.rx_ok, old_cntr.rx_ok, time_gap),
-                                  ns_util(cntr.rx_byt, old_cntr.rx_byt, time_gap, key),
+                                  ns_util(cntr.rx_byt, old_cntr.rx_byt, time_gap, port_speed),
                                   ns_diff(cntr.rx_err, old_cntr.rx_err),
                                   ns_diff(cntr.rx_drop, old_cntr.rx_drop),
                                   ns_diff(cntr.rx_ovr, old_cntr.rx_ovr),
                                   ns_diff(cntr.tx_ok, old_cntr.tx_ok),
                                   ns_brate(cntr.tx_byt, old_cntr.tx_byt, time_gap),
                                   ns_prate(cntr.tx_ok, old_cntr.tx_ok, time_gap),
-                                  ns_util(cntr.tx_byt, old_cntr.tx_byt, time_gap, key),
+                                  ns_util(cntr.tx_byt, old_cntr.tx_byt, time_gap, port_speed),
                                   ns_diff(cntr.tx_err, old_cntr.tx_err),
                                   ns_diff(cntr.tx_drop, old_cntr.tx_drop),
                                   ns_diff(cntr.tx_ovr, old_cntr.tx_ovr)))
@@ -312,7 +256,7 @@ class Portstat(object):
                                   STATUS_NA,
                                   cntr.tx_err,
                                   cntr.tx_drop,
-                                  cntr.tx_err))
+                                  cntr.tx_ovr))
             else:
                 if old_cntr is not None:
                     table.append((key, self.get_port_state(key),
@@ -341,10 +285,10 @@ class Portstat(object):
                                   STATUS_NA,
                                   cntr.tx_err,
                                   cntr.tx_drop,
-                                  cntr.tx_err))
+                                  cntr.tx_ovr))
 
         if use_json:
-            print self.table_as_json(table, print_all)
+            print table_as_json(table, header)
         else:
             if print_all:
                 print tabulate(table, header_all, tablefmt='simple', stralign='right')
