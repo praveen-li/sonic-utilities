@@ -17,7 +17,6 @@ import ipaddress
 from swsssdk import ConfigDBConnector
 from swsssdk import SonicV2Connector
 from minigraph import parse_device_desc_xml
-from sonic_device_util import get_system_routing_stack
 
 import aaa
 import mlnx
@@ -464,12 +463,6 @@ def _abort_if_false(ctx, param, value):
     if not value:
         ctx.abort()
 
-def _get_all_interfaces():
-    config_db = ConfigDBConnector()
-    config_db.connect()
-    interface_table_list = config_db.get_table('INTERFACE').keys()
-    return interface_table_list
-
 def _stop_services():
     # on Mellanox platform pmon is stopped by syncd
     services_to_stop = [
@@ -507,32 +500,6 @@ def _reset_failed_services():
     execute_systemctl(services_to_reset, SYSTEMCTL_ACTION_RESET_FAILED)
 
 
-
-def _reset_failed_services():
-    services_to_reset = [
-        'bgp',
-        'dhcp_relay',
-        'hostcfgd',
-        'hostname-config',
-        'interfaces-config',
-        'lldp',
-        'ntp-config',
-        'pmon',
-        'radv',
-        'rsyslog-config',
-        'snmp',
-        'swss',
-        'syncd',
-        'teamd'
-    ]
-
-    for service in services_to_reset:
-        try:
-            click.echo("Resetting failed status for service {} ...".format(service))
-            run_command("systemctl reset-failed {}".format(service))
-        except SystemExit as e:
-            log_error("Failed to reset failed status for service {}".format(service))
-            raise
 
 def _restart_services():
     # on Mellanox platform pmon is started by syncd
@@ -1503,69 +1470,6 @@ def del_vlan_dhcp_relay_destination(ctx, vid, dhcp_relay_destination_ip):
     else:
         ctx.fail("{} is not a DHCP relay destination for {}".format(dhcp_relay_destination_ip, vlan_name))
 
-routing_stack = get_system_routing_stack()
-
-if routing_stack == "quagga":
-    #
-    # 'bgp' group
-    #
-
-    @config.group()
-    def bgp():
-        """BGP-related configuration tasks"""
-        pass
-
-    #
-    # 'shutdown' subgroup
-    #
-
-    @bgp.group()
-    def shutdown():
-        """Shut down BGP session(s)"""
-        pass
-
-    # 'all' subcommand
-    @shutdown.command()
-    @click.option('-v', '--verbose', is_flag=True, help="Enable verbose output")
-    def all(verbose):
-        """Shut down all BGP sessions"""
-        bgp_neighbor_ip_list = _get_all_neighbor_ipaddresses()
-        for ipaddress in bgp_neighbor_ip_list:
-            _change_bgp_session_status_by_addr(ipaddress, 'down', verbose)
-
-    # 'neighbor' subcommand
-    @shutdown.command()
-    @click.argument('ipaddr_or_hostname', metavar='<ipaddr_or_hostname>', required=True)
-    @click.option('-v', '--verbose', is_flag=True, help="Enable verbose output")
-    def neighbor(ipaddr_or_hostname, verbose):
-        """Shut down BGP session by neighbor IP address or hostname"""
-        _change_bgp_session_status(ipaddr_or_hostname, 'down', verbose)
-
-    @bgp.group()
-    def startup():
-        """Start up BGP session(s)"""
-        pass
-
-    # 'all' subcommand
-    @startup.command()
-    @click.option('-v', '--verbose', is_flag=True, help="Enable verbose output")
-    def all(verbose):
-        """Start up all BGP sessions"""
-        bgp_neighbor_ip_list = _get_all_neighbor_ipaddresses()
-        for ipaddress in bgp_neighbor_ip_list:
-            _change_bgp_session_status(ipaddress, 'up', verbose)
-
-    # 'neighbor' subcommand
-    @startup.command()
-    @click.argument('ipaddr_or_hostname', metavar='<ipaddr_or_hostname>', required=True)
-    @click.option('-v', '--verbose', is_flag=True, help="Enable verbose output")
-    def neighbor(ipaddr_or_hostname, verbose):
-        """Start up BGP session by neighbor IP address or hostname"""
-        _change_bgp_session_status(ipaddr_or_hostname, 'up', verbose)
-
-elif routing_stack == "frr":
-    from frr_config_bgp import bgp
-    config.add_command(bgp)
 #
 # 'bgp' group ('config bgp ...')
 #

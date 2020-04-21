@@ -164,17 +164,6 @@ class Portstat(object):
         else:
             return STATUS_NA
 
-    def get_port_speed(self, port_name):
-        """
-            Get the port speed
-        """
-        full_table_id = PORT_STATUS_TABLE_PREFIX + port_name
-        port_speed = self.db.get(self.db.APPL_DB, full_table_id, PORT_SPEED_FIELD)
-        if port_speed is None:
-             return PORT_RATE
-	else:
-	     return int(port_speed)
-
     def cnstat_print(self, cnstat_dict, use_json, print_all):
         """
             Print the cnstat.

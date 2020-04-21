@@ -19,7 +19,7 @@ from setuptools import setup
 
 setup(
     name='sonic-utilities',
-    version='2.1.2',
+    version='3.0.0',
     description='Command-line utilities for SONiC',
     license='Apache 2.0',
     author='SONiC Team',
@@ -101,11 +101,9 @@ setup(
         'scripts/config-hwsku.sh',
         'scripts/portstat.py',
 	'scripts/syslog_helper.py',
-        'scripts/nbrshow',
         'scripts/tempershow',
         'scripts/update_json.py',
         'scripts/warm-reboot',
-        'scripts/watchdog',
         'scripts/watermarkstat',
         'scripts/watermarkcfg'
     ],
