@@ -4,6 +4,7 @@ import click
 import os
 import subprocess
 from click_default_group import DefaultGroup
+from sonic_device_util import get_system_routing_stack
 
 try:
     # noinspection PyPep8Naming
@@ -80,29 +81,8 @@ class AliasedGroup(DefaultGroup):
         ctx.fail('Too many matches: %s' % ', '.join(sorted(matches)))
 
 
-# To be enhanced. Routing-stack information should be collected from a global
-# location (configdb?), so that we prevent the continous execution of this
-# bash oneliner. To be revisited once routing-stack info is tracked somewhere.
-def get_routing_stack():
-    command = "sudo docker ps | grep bgp | awk '{print$2}' | cut -d'-' -f3 | cut -d':' -f1"
-
-    try:
-        proc = subprocess.Popen(command,
-                                stdout=subprocess.PIPE,
-                                shell=True,
-                                stderr=subprocess.STDOUT)
-        stdout = proc.communicate()[0]
-        proc.wait()
-        result = stdout.rstrip('\n')
-
-    except OSError, e:
-        raise OSError("Cannot detect routing-stack")
-
-    return (result)
-
-
 # Global Routing-Stack variable
-routing_stack = get_routing_stack()
+routing_stack = get_system_routing_stack()
 
 
 def run_command(command, pager=False, return_output=False):

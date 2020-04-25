@@ -166,7 +166,7 @@ class AliasedGroup(DefaultGroup):
 
 
 # Global Routing-Stack variable
-routing_stack = get_routing_stack()
+routing_stack = get_system_routing_stack()
 
 
 def run_command(command, display_cmd=False, return_cmd=False):
@@ -1542,8 +1542,6 @@ def protocol(verbose):
 # Inserting BGP functionality into cli's show parse-chain.
 # BGP commands are determined by the routing-stack being elected.
 #
-routing_stack = get_system_routing_stack()
-
 if routing_stack == "quagga":
 
     from .bgp_quagga_v4 import bgp
