@@ -6,8 +6,6 @@ import re
 import types
 from tabulate import tabulate
 from natsort import natsorted
-from collections import OrderedDict
-import portstat
 from swsssdk import ConfigDBConnector
 from pprint import pprint
 import os
@@ -35,9 +33,6 @@ PORT_ADMIN_STATUS = "admin_status"
 PORT_SPEED = "speed"
 PORT_MTU_STATUS = "mtu"
 PORT_DESCRIPTION = "description"
-PORT_FLAP_COUNTER = "flap_counter"
-PORT_LAST_FLAP_TIME = "last_flap"
-NStats = portstat.NStats
 PORT_OPTICS_TYPE = "type"
 PORT_PFC_ASYM_STATUS = "pfc_asym"
 
@@ -344,7 +339,8 @@ def appl_db_sub_intf_status_get(appl_db, config_db, front_panel_ports_list, port
     return "N/A"
 
 # ========================== interface-status logic ==========================
-header_stat = ['Interface', 'Admin', 'Oper',  'Alias', 'Lanes', 'Speed', 'MTU', 'Vlan', 'Type', 'Asym PFC', 'Flaps', 'Last Flap (in UTC)']
+
+header_stat = ['Interface', 'Lanes', 'Speed', 'MTU', 'Alias', 'Vlan', 'Oper', 'Admin', 'Type', 'Asym PFC']
 header_stat_sub_intf = ['Sub port interface', 'Speed', 'MTU', 'Vlan', 'Admin', 'Type']
 
 class IntfStatus(object):
@@ -358,13 +354,6 @@ class IntfStatus(object):
         table = []
         key = []
 
-        cnstat_cached_dict = OrderedDict()
-        port_obj = portstat.Portstat()
-
-        cached_stats_file_hidden = port_obj.cached_stats_file_hidden
-        cnstat_fqn_file = port_obj.get_file_path(cached_stats_file_hidden)
-        cnstat_dict = port_obj.get_cnstat()
-        cnstat_cached_dict = port_obj.get_cache_dict(cnstat_fqn_file, cnstat_dict)
         #
         # Iterate through all the keys and append port's associated state to
         # the result table.
@@ -373,41 +362,29 @@ class IntfStatus(object):
             for i in appl_db_keys:
                 key = re.split(':', i, maxsplit=1)[-1].strip()
                 if key in front_panel_ports_list:
-                    try:
-                        db_flap = long(appl_db_port_status_get(self.appl_db, key, PORT_FLAP_COUNTER))
-                        cache_flap = long(cnstat_cached_dict[key].flap_counter)
-                    except Exception as e:
-                        db_flap = 0
-                        cache_flap = 0
-                    final_flap = str(db_flap - cache_flap)
                     table.append((key,
-                                  appl_db_port_status_get(self.appl_db, key, PORT_ADMIN_STATUS),
-                                  appl_db_port_status_get(self.appl_db, key, PORT_OPER_STATUS),
-                                  appl_db_port_status_get(self.appl_db, key, PORT_ALIAS),
-                                  appl_db_port_status_get(self.appl_db, key, PORT_LANES_STATUS),
-                                  appl_db_port_status_get(self.appl_db, key, PORT_SPEED),
-                                  appl_db_port_status_get(self.appl_db, key, PORT_MTU_STATUS),
-                                  config_db_vlan_port_keys_get(self.combined_int_to_vlan_po_dict, self.front_panel_ports_list, key),
-                                  state_db_port_optics_get(self.state_db, key, PORT_OPTICS_TYPE),
-                                  appl_db_port_status_get(self.appl_db, key, PORT_PFC_ASYM_STATUS),
-                                  final_flap,
-                                  appl_db_port_status_get(self.appl_db, key, PORT_LAST_FLAP_TIME)))
-
+                                appl_db_port_status_get(self.appl_db, key, PORT_LANES_STATUS),
+                                appl_db_port_status_get(self.appl_db, key, PORT_SPEED),
+                                appl_db_port_status_get(self.appl_db, key, PORT_MTU_STATUS),
+                                appl_db_port_status_get(self.appl_db, key, PORT_ALIAS),
+                                config_db_vlan_port_keys_get(self.combined_int_to_vlan_po_dict, self.front_panel_ports_list, key),
+                                appl_db_port_status_get(self.appl_db, key, PORT_OPER_STATUS),
+                                appl_db_port_status_get(self.appl_db, key, PORT_ADMIN_STATUS),
+                                state_db_port_optics_get(self.state_db, key, PORT_OPTICS_TYPE),
+                                appl_db_port_status_get(self.appl_db, key, PORT_PFC_ASYM_STATUS)))
 
             for po, value in portchannel_speed_dict.iteritems():
                 if po:
                     table.append((po,
-                                appl_db_portchannel_status_get(self.appl_db, self.config_db, po, PORT_ADMIN_STATUS, self.portchannel_speed_dict),
-                                appl_db_portchannel_status_get(self.appl_db, self.config_db, po, PORT_OPER_STATUS, self.portchannel_speed_dict),
-                                appl_db_portchannel_status_get(self.appl_db, self.config_db, po, PORT_ALIAS, self.portchannel_speed_dict),
                                 appl_db_portchannel_status_get(self.appl_db, self.config_db, po, PORT_LANES_STATUS, self.portchannel_speed_dict),
                                 appl_db_portchannel_status_get(self.appl_db, self.config_db, po, PORT_SPEED, self.portchannel_speed_dict),
                                 appl_db_portchannel_status_get(self.appl_db, self.config_db, po, PORT_MTU_STATUS, self.portchannel_speed_dict),
+                                appl_db_portchannel_status_get(self.appl_db, self.config_db, po, PORT_ALIAS, self.portchannel_speed_dict),
                                 appl_db_portchannel_status_get(self.appl_db, self.config_db, po, "vlan", self.portchannel_speed_dict),
+                                appl_db_portchannel_status_get(self.appl_db, self.config_db, po, PORT_OPER_STATUS, self.portchannel_speed_dict),
+                                appl_db_portchannel_status_get(self.appl_db, self.config_db, po, PORT_ADMIN_STATUS, self.portchannel_speed_dict),
                                 appl_db_portchannel_status_get(self.appl_db, self.config_db, po, PORT_OPTICS_TYPE, self.portchannel_speed_dict),
-                                appl_db_portchannel_status_get(self.appl_db, self.config_db, po, PORT_PFC_ASYM_STATUS, self.portchannel_speed_dict),
-                                0,
-                                "N/A"))
+                                appl_db_portchannel_status_get(self.appl_db, self.config_db, po, PORT_PFC_ASYM_STATUS, self.portchannel_speed_dict)))
         else:
             for key in appl_db_sub_intf_keys:
                 sub_intf = re.split(':', key, maxsplit=1)[-1].strip()
@@ -418,7 +395,6 @@ class IntfStatus(object):
                                 appl_db_sub_intf_status_get(self.appl_db, self.config_db, self.front_panel_ports_list, self.portchannel_speed_dict, sub_intf, "vlan"),
                                 appl_db_sub_intf_status_get(self.appl_db, self.config_db, self.front_panel_ports_list, self.portchannel_speed_dict, sub_intf, PORT_ADMIN_STATUS),
                                 appl_db_sub_intf_status_get(self.appl_db, self.config_db, self.front_panel_ports_list, self.portchannel_speed_dict, sub_intf, PORT_OPTICS_TYPE)))
-
 
         # Sorting and tabulating the result table.
         sorted_table = natsorted(table)
@@ -478,7 +454,7 @@ class IntfStatus(object):
 # ========================== interface-description logic ==========================
 
 
-header_desc = ['Interface', 'Admin', 'Oper', 'Alias', 'Description']
+header_desc = ['Interface', 'Oper', 'Admin', 'Alias', 'Description']
 
 
 class IntfDescription(object):
@@ -500,8 +476,8 @@ class IntfDescription(object):
             key = re.split(':', i, maxsplit=1)[-1].strip()
             if key in front_panel_ports_list:
                 table.append((key,
-                              appl_db_port_status_get(self.appl_db, key, PORT_ADMIN_STATUS),
                               appl_db_port_status_get(self.appl_db, key, PORT_OPER_STATUS),
+                              appl_db_port_status_get(self.appl_db, key, PORT_ADMIN_STATUS),
                               appl_db_port_status_get(self.appl_db, key, PORT_ALIAS),
                               appl_db_port_status_get(self.appl_db, key, PORT_DESCRIPTION)))
 
