@@ -119,7 +119,10 @@ class Portstat(object):
                     fields[pos] = STATUS_NA
                 elif fields[pos] != STATUS_NA:
                     fields[pos] = str(int(fields[pos]) + int(counter_data))
-            fields[FIELD_COUNT-1] = str(int(fields[FIELD_COUNT-1]) + int(flap_data))
+            if flap_data is None:
+                fields[FIELD_COUNT-1] = 0
+            else:
+                fields[FIELD_COUNT-1] = str(int(fields[FIELD_COUNT-1]) + int(flap_data))
             cntr = NStats._make(fields)
             return cntr
         # Get the info from database
