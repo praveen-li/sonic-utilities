@@ -410,31 +410,29 @@ Examples:
             print("Permission Denied, Please run as root/sudo")
             sys.exit(ERR_PER_DEN)
         try:
-            # Open the file with 'rw' mode
-            cnstat_fqn_fd = open(cnstat_fqn_file, 'r+')
+            if portClear is not None:
+                # At this point, we'll read the contents and keep it in a dictionary.
+                cnstat_cached_dict = portstat.get_cache_dict(cnstat_fqn_file, cnstat_dict)
+
+                # we'll update only the content of the user-selected port.
+                cnstat_cached_dict[portClear] = cnstat_dict[portClear]
+
+            # Open the file with 'w' mode
+            cnstat_fqn_fd = open(cnstat_fqn_file, 'w')
 
             # Lock the file
             portstat._lock_file(cnstat_fqn_fd)
 
-            # Copy and Clear stats for all ports
-            if portClear is None:
-                pickle.dump(cnstat_dict, cnstat_fqn_fd)
+            # Reposition pointer at the beginning of the fileonce again
+            position = cnstat_fqn_fd.seek(0, 0)
 
             # Copy and Clear stats for user-selected port
-            else:
-                cnstat_dict_port = OrderedDict()
-
-                # At this point, we'll read the contents and keep it in a dictionary.
-                cnstat_dict_port = pickle.load(cnstat_fqn_fd)
-
-                # we'll update only the content of the user-selected port.
-                cnstat_dict_port[portClear] = cnstat_dict[portClear]
-
-                # Reposition pointer at the beginning of the fileonce again
-                position = cnstat_fqn_fd.seek(0, 0)
-
+            if portClear is not None:
                 # Dump the updated dictionary to the file
-                pickle.dump(cnstat_dict_port, cnstat_fqn_fd)
+                pickle.dump(cnstat_cached_dict, cnstat_fqn_fd)
+            else:
+                # Copy and Clear stats for all ports
+                pickle.dump(cnstat_dict, cnstat_fqn_fd)
 
             # Unlock the file
             portstat._unlock_file(cnstat_fqn_fd)
