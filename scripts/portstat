@@ -459,7 +459,7 @@ Examples:
         #wait for the specified time and then gather the new stats and output the difference.
         time.sleep(wait_time_in_seconds)
         print "The rates are calculated within %s seconds period" % wait_time_in_seconds
-        cnstat_dict = portstat.get_cnstat()
+        cnstat_new_dict = portstat.get_cnstat()
         portstat.cnstat_diff_print(cnstat_new_dict, cnstat_dict, use_json, print_all)
 
 if __name__ == "__main__":
