@@ -10,12 +10,8 @@ try:
     load_source('sonic_cfggen', '/usr/local/bin/sonic-cfggen')
     from sonic_cfggen import deep_update, FormatConverter, sort_data
     from swsssdk import ConfigDBConnector, SonicV2Connector, port_util
-    from pprint import PrettyPrinter, pprint
-    from json import dump, load, dumps, loads
-    from sys import path as sysPath
-    from os import path as osPath
+    from json import load
     from os import system
-    from datetime import datetime
     from time import sleep as tsleep
 
     import sonic_yang
@@ -92,7 +88,7 @@ class ConfigMgmt():
 
         return
 
-        """
+    """
     Validate current Data Tree
     """
     def validateConfigData(self):
@@ -192,7 +188,7 @@ class ConfigMgmtDPB(ConfigMgmt):
     """
       Check if a key exists in ASIC DB or not.
     """
-    def checkKeyinAsicDB(self, key, db):
+    def _checkKeyinAsicDB(self, key, db):
 
         self.sysLog(msg='Check Key in Asic DB: {}'.format(key))
         try:
@@ -205,7 +201,7 @@ class ConfigMgmtDPB(ConfigMgmt):
 
         return False
 
-    def testRedisCli(self, key):
+    def _testRedisCli(self, key):
         # To Debug
         if self.DEBUG:
             cmd = 'sudo redis-cli -n 1 hgetall "{}"'.format(key)
@@ -220,15 +216,15 @@ class ConfigMgmtDPB(ConfigMgmt):
      portMap: port to OID map.
      Return: True, if all ports are not present.
     """
-    def checkNoPortsInAsicDb(self, db, ports, portMap):
+    def _checkNoPortsInAsicDb(self, db, ports, portMap):
         try:
             # connect to ASIC DB,
             db.connect(db.ASIC_DB)
             for port in ports:
                 key = self.oidKey + portMap[port]
-                if self.checkKeyinAsicDB(key, db) == False:
+                if self._checkKeyinAsicDB(key, db) == False:
                     # Test again via redis-cli
-                    self.testRedisCli(key)
+                    self._testRedisCli(key)
                 else:
                     return False
 
@@ -243,7 +239,7 @@ class ConfigMgmtDPB(ConfigMgmt):
     Keep on trying till timeout period.
     db = database, ports, portMap, timeout
     """
-    def verifyAsicDB(self, db, ports, portMap, timeout):
+    def _verifyAsicDB(self, db, ports, portMap, timeout):
 
         print("Verify Port Deletion from Asic DB, Wait...")
         self.sysLog(msg="Verify Port Deletion from Asic DB, Wait...")
@@ -253,7 +249,7 @@ class ConfigMgmtDPB(ConfigMgmt):
                 self.sysLog(msg='Check Asic DB: {} try'.format(waitTime+1))
                 # checkNoPortsInAsicDb will return True if all ports are not
                 # present in ASIC DB
-                if self.checkNoPortsInAsicDb(db, ports, portMap):
+                if self._checkNoPortsInAsicDb(db, ports, portMap):
                     break
                 tsleep(1)
 
@@ -277,14 +273,14 @@ class ConfigMgmtDPB(ConfigMgmt):
         MAX_WAIT = 60
         try:
             # delete Port and get the Config diff, deps and True/False
-            delConfigToLoad, deps, ret = self.deletePorts(ports=delPorts, \
+            delConfigToLoad, deps, ret = self._deletePorts(ports=delPorts, \
                 force=force)
             # return dependencies if delete port fails
             if ret == False:
                 return deps, ret
 
             # add Ports and get the config diff and True/False
-            addConfigtoLoad, ret = self.addPorts(ports=addPorts, \
+            addConfigtoLoad, ret = self._addPorts(ports=addPorts, \
                 portJson=portJson, loadDefConfig=loadDefConfig)
             # return if ret is False, Great thing, no change is done in Config
             if ret == False:
@@ -300,7 +296,7 @@ class ConfigMgmtDPB(ConfigMgmt):
             # then update addition of ports in config DB.
             self.writeConfigDB(delConfigToLoad)
             # Verify in Asic DB,
-            self.verifyAsicDB(db=dataBase, ports=delPorts, portMap=if_name_map, \
+            self._verifyAsicDB(db=dataBase, ports=delPorts, portMap=if_name_map, \
                 timeout=MAX_WAIT)
             self.writeConfigDB(addConfigtoLoad)
 
@@ -319,7 +315,7 @@ class ConfigMgmtDPB(ConfigMgmt):
     WithOut Force: (xpath of dependecies, False) or (None, True)
     With Force: (xpath of dependecies, False) or (None, True)
     """
-    def deletePorts(self, ports=list(), force=False):
+    def _deletePorts(self, ports=list(), force=False):
 
         configToLoad = None; deps = None
         try:
@@ -365,7 +361,7 @@ class ConfigMgmtDPB(ConfigMgmt):
             # All great if we are here, Lets get the diff
             self.configdbJsonOut = self.sy.getData()
             # Update configToLoad
-            configToLoad = self.updateDiffConfigDB()
+            configToLoad = self._updateDiffConfigDB()
 
         except Exception as e:
             print(e)
@@ -384,7 +380,7 @@ class ConfigMgmtDPB(ConfigMgmt):
 
     return: Sucess: True or Failure: False
     """
-    def addPorts(self, ports=list(), portJson=dict(), loadDefConfig=True):
+    def _addPorts(self, ports=list(), portJson=dict(), loadDefConfig=True):
 
         configToLoad = None
         try:
@@ -394,10 +390,9 @@ class ConfigMgmtDPB(ConfigMgmt):
             self.sysLog(msg="addPorts Args portjson {}".format(portJson))
 
             print('\nStart Port Addition')
-            # get default config if forced
-            defConfig = dict()
+
             if loadDefConfig:
-                defConfig = self.getDefaultConfig(ports)
+                defConfig = self._getDefaultConfig(ports)
                 self.sysLog(msg='Default Config: {}'.format(defConfig))
 
             # get the latest Data Tree, save this in input config, since this
@@ -415,7 +410,7 @@ class ConfigMgmtDPB(ConfigMgmt):
             if loadDefConfig:
                 print("Merge Default Config for {}".format(ports))
                 self.sysLog(msg="Merge Default Config for {}".format(ports))
-                self.mergeConfigs(self.configdbJsonOut, defConfig, True)
+                self._mergeConfigs(self.configdbJsonOut, defConfig, True)
 
             # create a tree with merged config and validate, if validation is
             # sucessful, then configdbJsonOut contains final and valid config.
@@ -424,7 +419,7 @@ class ConfigMgmtDPB(ConfigMgmt):
                 return configToLoad, False
 
             # All great if we are here, Let`s get the diff and update COnfig
-            configToLoad = self.updateDiffConfigDB()
+            configToLoad = self._updateDiffConfigDB()
 
         except Exception as e:
             print(e)
@@ -439,14 +434,14 @@ class ConfigMgmtDPB(ConfigMgmt):
     Second dict will have D2 - D1 [unique keys in D2]
     Unique keys in D2 will be merged in D1 only if uniqueKeys=True
     """
-    def mergeConfigs(self, D1, D2, uniqueKeys=True):
+    def _mergeConfigs(self, D1, D2, uniqueKeys=True):
 
         try:
-            def mergeItems(it1, it2):
+            def _mergeItems(it1, it2):
                 if isinstance(it1, list) and isinstance(it2, list):
                     it1.extend(it2)
                 elif isinstance(it1, dict) and isinstance(it2, dict):
-                    self.mergeConfigs(it1, it2)
+                    self._mergeConfigs(it1, it2)
                 elif isinstance(it1, list) or isinstance(it2, list):
                     raise ("Can not merge Configs, List problem")
                 elif isinstance(it1, dict) or isinstance(it2, dict):
@@ -461,7 +456,7 @@ class ConfigMgmtDPB(ConfigMgmt):
                 #print(it)
                 # D2 has the key
                 if D2.get(it):
-                    mergeItems(D1[it], D2[it])
+                    _mergeItems(D1[it], D2[it])
                     del D2[it]
                 # D2  does not have the keys
                 else:
@@ -484,7 +479,7 @@ class ConfigMgmtDPB(ConfigMgmt):
     skeys: Keys to be searched in In Config i.e. search Keys.
     Out: Contains the search result
     """
-    def searchKeysInConfig(self, In, Out, skeys):
+    def _searchKeysInConfig(self, In, Out, skeys):
 
         found = False
         if isinstance(In, dict):
@@ -508,7 +503,7 @@ class ConfigMgmtDPB(ConfigMgmt):
                 # Remove later, if subelements does not contain any port.
                 if Out.get(key) is None:
                     Out[key] = type(In[key])()
-                    if self.searchKeysInConfig(In[key], Out[key], skeys) == False:
+                    if self._searchKeysInConfig(In[key], Out[key], skeys) == False:
                         del Out[key]
                     else:
                         found = True
@@ -535,7 +530,7 @@ class ConfigMgmtDPB(ConfigMgmt):
         configOut = dict()
         try:
             if len(configIn) and len(keys):
-                self.searchKeysInConfig(configIn, configOut, skeys=keys)
+                self._searchKeysInConfig(configIn, configOut, skeys=keys)
         except Exception as e:
             print("configWithKeys Failed, Error: {}".format(str(e)))
             raise e
@@ -545,7 +540,7 @@ class ConfigMgmtDPB(ConfigMgmt):
     """
     Create a defConfig for given Ports from Default Config File.
     """
-    def getDefaultConfig(self, ports=list()):
+    def _getDefaultConfig(self, ports=list()):
 
         # function code
         try:
@@ -553,23 +548,22 @@ class ConfigMgmtDPB(ConfigMgmt):
             defConfigIn = readJsonFile(DEFAULT_CONFIG_DB_JSON_FILE)
             #print(defConfigIn)
             defConfigOut = dict()
-            self.searchKeysInConfig(defConfigIn, defConfigOut, skeys=ports)
+            self._searchKeysInConfig(defConfigIn, defConfigOut, skeys=ports)
         except Exception as e:
             print("getDefaultConfig Failed, Error: {}".format(str(e)))
             raise e
 
         return defConfigOut
 
-    def updateDiffConfigDB(self):
+    def _updateDiffConfigDB(self):
 
         # main code starts here
-        configToLoad = dict()
         try:
             # Get the Diff
             print('Generate Final Config to write in DB')
-            configDBdiff = self.diffJson()
+            configDBdiff = self._diffJson()
             # Process diff and create Config which can be updated in Config DB
-            configToLoad = self.createConfigToLoad(configDBdiff, \
+            configToLoad = self._createConfigToLoad(configDBdiff, \
                 self.configdbJsonIn, self.configdbJsonOut)
 
         except Exception as e:
@@ -585,13 +579,13 @@ class ConfigMgmtDPB(ConfigMgmt):
     inp: input config before delete/add ports.
     outp: output config after delete/add ports.
     """
-    def createConfigToLoad(self, diff, inp, outp):
+    def _createConfigToLoad(self, diff, inp, outp):
 
         ### Internal Functions ###
         """
         Handle deletes in diff dict
         """
-        def deleteHandler(diff, inp, outp, config):
+        def _deleteHandler(diff, inp, outp, config):
 
             # if output is dict, delete keys from config
             if isinstance(inp, dict):
@@ -617,7 +611,7 @@ class ConfigMgmtDPB(ConfigMgmt):
         """
         Handle inserts in diff dict
         """
-        def insertHandler(diff, inp, outp, config):
+        def _insertHandler(diff, inp, outp, config):
 
             # if outp is a dict
             if isinstance(outp, dict):
@@ -641,7 +635,7 @@ class ConfigMgmtDPB(ConfigMgmt):
         """
         Recursively iterate diff to generate config to write in configDB
         """
-        def recurCreateConfig(diff, inp, outp, config):
+        def _recurCreateConfig(diff, inp, outp, config):
 
             changed = False
             # updates are represented by list in diff and as dict in outp\inp
@@ -654,24 +648,24 @@ class ConfigMgmtDPB(ConfigMgmt):
                 #print(key)
                 idx = idx + 1
                 if str(key) == '$delete':
-                    deleteHandler(diff[key], inp, outp, config)
+                    _deleteHandler(diff[key], inp, outp, config)
                     changed = True
                 elif str(key) == '$insert':
-                    insertHandler(diff[key], inp, outp, config)
+                    _insertHandler(diff[key], inp, outp, config)
                     changed = True
                 else:
                     # insert in config by default, remove later if not needed
                     if isinstance(diff, dict):
                         # config should match with outp
                         config[key] = type(outp[key])()
-                        if recurCreateConfig(diff[key], inp[key], outp[key], \
+                        if _recurCreateConfig(diff[key], inp[key], outp[key], \
                             config[key]) == False:
                             del config[key]
                         else:
                             changed = True
                     elif isinstance(diff, list):
                         config.append(key)
-                        if recurCreateConfig(diff[idx], inp[idx], outp[idx], \
+                        if _recurCreateConfig(diff[idx], inp[idx], outp[idx], \
                             config[-1]) == False:
                             del config[-1]
                         else:
@@ -683,7 +677,7 @@ class ConfigMgmtDPB(ConfigMgmt):
         try:
             configToLoad = dict()
             #import pdb; pdb.set_trace()
-            recurCreateConfig(diff, inp, outp, configToLoad)
+            _recurCreateConfig(diff, inp, outp, configToLoad)
 
         except Exception as e:
             print("Create Config to load in DB, Failed")
@@ -696,7 +690,7 @@ class ConfigMgmtDPB(ConfigMgmt):
 
         return configToLoad
 
-    def diffJson(self):
+    def _diffJson(self):
 
         from jsondiff import diff
         return diff(self.configdbJsonIn, self.configdbJsonOut, syntax='symmetric')
