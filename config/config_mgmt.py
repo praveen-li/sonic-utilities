@@ -49,7 +49,7 @@ class ConfigMgmt():
             self.SYSLOG_IDENTIFIER = "ConfigMgmt"
             self.DEBUG = debug
 
-            self.sy = sonic_yang.sonic_yang(YANG_DIR, debug=debug)
+            self.sy = sonic_yang.SonicYang(YANG_DIR, debug=debug)
             # load yang models
             self.sy.loadYangModel()
             # load jIn from config DB or from config DB json file.
@@ -59,7 +59,7 @@ class ConfigMgmt():
             else:
                 self.readConfigDBJson(source)
             # this will crop config, xlate and load.
-            self.sy.load_data(self.configdbJsonIn)
+            self.sy.loadData(self.configdbJsonIn)
 
             # Raise if tables without YANG models are not allowed but exist.
             if not allowTablesWithOutYang and len(self.sy.tablesWithOutYang):
@@ -85,7 +85,7 @@ class ConfigMgmt():
     Explicit function to load config data in Yang Data Tree
     """
     def loadData(self, configdbJson):
-        self.sy.load_data(configdbJson)
+        self.sy.loadData(configdbJson)
         # Raise if tables without YANG models are not allowed but exist.
         if not self.allowTablesWithOutYang and len(self.sy.tablesWithOutYang):
             raise Exception('Config has tables without YANG models')
@@ -347,7 +347,7 @@ class ConfigMgmtDPB(ConfigMgmt):
             elif deps and force:
                 for dep in deps:
                     self.sysLog(msg='Deleting {}'.format(dep))
-                    self.sy.delete_node(str(dep))
+                    self.sy.deleteNode(str(dep))
             # mark deps as None now,
             deps = None
 
@@ -356,14 +356,14 @@ class ConfigMgmtDPB(ConfigMgmt):
                 xPathPort = self.sy.findXpathPort(port)
                 print("Deleting Port: " + port)
                 self.sysLog(msg='Deleting Port:{}'.format(port))
-                self.sy.delete_node(str(xPathPort))
+                self.sy.deleteNode(str(xPathPort))
 
             # Let`s Validate the tree now
             if self.validateConfigData()==False:
                 return configToLoad, deps, False;
 
             # All great if we are here, Lets get the diff
-            self.configdbJsonOut = self.sy.get_data()
+            self.configdbJsonOut = self.sy.getData()
             # Update configToLoad
             configToLoad = self.updateDiffConfigDB()
 
@@ -402,11 +402,11 @@ class ConfigMgmtDPB(ConfigMgmt):
 
             # get the latest Data Tree, save this in input config, since this
             # is our starting point now
-            self.configdbJsonIn = self.sy.get_data()
+            self.configdbJsonIn = self.sy.getData()
 
             # Get the out dict as well, if not done already
             if self.configdbJsonOut is None:
-                self.configdbJsonOut = self.sy.get_data()
+                self.configdbJsonOut = self.sy.getData()
 
             # update portJson in configdbJsonOut PORT part
             self.configdbJsonOut['PORT'].update(portJson['PORT'])
@@ -419,7 +419,7 @@ class ConfigMgmtDPB(ConfigMgmt):
 
             # create a tree with merged config and validate, if validation is
             # sucessful, then configdbJsonOut contains final and valid config.
-            self.sy.load_data(self.configdbJsonOut)
+            self.sy.loadData(self.configdbJsonOut)
             if self.validateConfigData()==False:
                 return configToLoad, False
 
@@ -703,21 +703,9 @@ class ConfigMgmtDPB(ConfigMgmt):
 
 # end of class ConfigMgmtDPB
 
-"""
-    Test Functions:
-    Below Test provides unit test funtionalities to test config_mgmt without
-    intergration with Python click.
-    These tests can be executed on Sonic Switch or in VS environment. User needs
-    to run these test by running this test script directly. i.e.
-    python config_mgmt.py
-
-    Prerequisite: To have a config loaded with Ethernet0 in 4X25G/1x100G/2x50G
-    mode. Also default config file must be placed at /etc/sonic.
-"""
-
-# Read given JSON file
+# Helper Functions
 def readJsonFile(fileName):
-    #print(fileName)
+
     try:
         with open(fileName) as f:
             result = load(f)
@@ -725,149 +713,3 @@ def readJsonFile(fileName):
         raise Exception(e)
 
     return result
-
-# print pretty
-prt = PrettyPrinter(indent=4)
-def prtprint(obj):
-    prt.pprint(obj)
-    return
-
-def getPortConfigDB():
-    # Read from config DB on sonic switch
-    db_kwargs = dict(); data = dict()
-    configdb = ConfigDBConnector(**db_kwargs)
-    configdb.connect()
-    deep_update(data, FormatConverter.db_to_output(configdb.get_table('PORT')))
-
-    return data
-
-
-def testRun_Delete_Add_Port(cmode, nmode, loadDef):
-
-    ## Params for Ethernet 0, Note Test is only for one PORT
-    delPortDict = {
-        '4x25G[10G]' : ['Ethernet0', 'Ethernet1', 'Ethernet2', 'Ethernet3'],
-        '1x100G[40G]': ['Ethernet0'],
-        '2x50G': ['Ethernet0', 'Ethernet2']
-    }
-
-    portJsonDict = {
-        '4x25G[10G]': {
-            "PORT": {
-                "Ethernet0": {
-                    "alias": "Eth1/1",
-                    "description": "",
-                    "index": "0",
-                    "lanes": "65",
-                    "speed": "25000"
-                },
-                "Ethernet1": {
-                    "alias": "Eth1/2",
-                    "description": "",
-                    "index": "0",
-                    "lanes": "66",
-                    "speed": "25000"
-                },
-                "Ethernet2": {
-                    "alias": "Eth1/3",
-                    "description": "",
-                    "index": "0",
-                    "lanes": "67",
-                    "speed": "25000"
-                },
-                "Ethernet3": {
-                    "alias": "Eth1/4",
-                    "description": "",
-                    "index": "0",
-                    "lanes": "68",
-                    "speed": "25000"
-                }
-            }
-        },
-        '1x100G[40G]': {
-            "PORT": {
-                "Ethernet0": {
-                        "alias": "Eth1/1",
-                        "admin_status": "up",
-                        "lanes": "65,66,67,68",
-                        "description": "",
-                        "speed": "100000"
-                }
-            }
-        },
-        '2x50G': {
-            "PORT": {
-                "Ethernet0": {
-                        "alias": "Eth1/1",
-                        "admin_status": "up",
-                        "lanes": "65,66",
-                        "description": "",
-                        "speed": "50000"
-                },
-                "Ethernet2": {
-                        "alias": "Eth1/3",
-                        "admin_status": "up",
-                        "lanes": "67,68",
-                        "description": "",
-                        "speed": "50000"
-                }
-            }
-        }
-    }
-
-    # TODO: Verify config in Config DB  after writing to config DB.
-    print('Test Run Break Out Ports')
-    try:
-        cm = ConfigMgmtDPB(source='configDB', debug=True)
-
-        delPorts = delPortDict[cmode]
-        addPorts = delPortDict[nmode]
-        portJson = portJsonDict[nmode].copy()
-
-        cm.breakOutPort(delPorts=delPorts, addPorts= addPorts, portJson=portJson,\
-            force=True, loadDefConfig=loadDef)
-
-        print("\n***Port Break Out Test Passed***\n")
-
-    except Exception as e:
-        print(e)
-        print("\n***Port Break Out Test Failed***\n")
-        return
-
-    return
-
-def main():
-    import argparse
-    parser = argparse.ArgumentParser(description='Test Dy Port BreakOut Without \
-                Python click Integration',
-                formatter_class=argparse.RawTextHelpFormatter, epilog="""
-Usage:
-python config_mgmt.py --currect-mode(-c) $CUR_MODE --new-mode(-n) $NEW_MODE
-""")
-
-    parser.add_argument('-c', '--currect-mode', type=str, \
-        help='Current Mode of PORT', required=True, \
-        choices=['4x25G[10G]', '1x100G[40G]', '2x50G'])
-    parser.add_argument('-n', '--new-mode', type=str, \
-        help='New Mode of PORT', required=True, \
-        choices=['4x25G[10G]', '1x100G[40G]', '2x50G'])
-    parser.add_argument('-l', '--load-default', type=bool, \
-        help='Load Default Config if True', required=True, \
-        choices=[True, False])
-
-    args = parser.parse_args()
-
-    #fill the args
-    cmode = args.currect_mode
-    nmode = args.new_mode
-    loadDef = args.load_default
-    if cmode == nmode:
-        print("Current Mode of PORT is same as ew Mode")
-        return
-
-    testRun_Delete_Add_Port(cmode, nmode, loadDef)
-
-    return
-
-if __name__ == '__main__':
-    main()
