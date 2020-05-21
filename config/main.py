@@ -181,7 +181,7 @@ def breakout_warnUser_extraTables(cm, final_delPorts, confirm=True):
 
     try:
         # check if any extra tables exist
-        eTables = cm.tablesWithOutYang()
+        eTables = cm.tablesWithoutYang()
         if len(eTables):
             # find relavent tables in extra tables, i.e. one which can have deleted
             # ports
