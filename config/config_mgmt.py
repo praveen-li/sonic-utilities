@@ -1,22 +1,24 @@
-#!/usr/bin/env python
-#
 # config_mgmt.py
 # Provides a class for configuration validation and for Dynamic Port Breakout.
 
 try:
 
-    # import from sonic-cfggen, re use this
-    from imp import load_source
-    load_source('sonic_cfggen', '/usr/local/bin/sonic-cfggen')
-    from sonic_cfggen import deep_update, FormatConverter, sort_data
-    from swsssdk import ConfigDBConnector, SonicV2Connector, port_util
+    import re
+    import syslog
+
     from json import load
     from os import system
     from time import sleep as tsleep
+    from imp import load_source
 
+    # SONiC specific imports
     import sonic_yang
-    import syslog
-    import re
+    from swsssdk import ConfigDBConnector, SonicV2Connector, port_util
+
+    # Using load_source to 'import /usr/local/bin/sonic-cfggen as sonic_cfggen'
+    # since /usr/local/bin/sonic-cfggen does not have .py extension.
+    load_source('sonic_cfggen', '/usr/local/bin/sonic-cfggen')
+    from sonic_cfggen import deep_update, FormatConverter, sort_data
 
 except ImportError as e:
     raise ImportError("%s - required module not found" % str(e))
@@ -34,12 +36,12 @@ DEFAULT_CONFIG_DB_JSON_FILE = '/etc/sonic/default_config_db.json'
 
 class ConfigMgmt():
 
-    def __init__(self, source="configDB", debug=False, allowTablesWithOutYang=True):
+    def __init__(self, source="configDB", debug=False, allowTablesWithoutYang=True):
 
         try:
             self.configdbJsonIn = None
             self.configdbJsonOut = None
-            self.allowTablesWithOutYang = allowTablesWithOutYang
+            self.allowTablesWithoutYang = allowTablesWithoutYang
 
             # logging vars
             self.SYSLOG_IDENTIFIER = "ConfigMgmt"
@@ -58,7 +60,7 @@ class ConfigMgmt():
             self.sy.loadData(self.configdbJsonIn)
 
             # Raise if tables without YANG models are not allowed but exist.
-            if not allowTablesWithOutYang and len(self.sy.tablesWithOutYang):
+            if not allowTablesWithoutYang and len(self.sy.tablesWithOutYang):
                 raise Exception('Config has tables without YANG models')
 
         except Exception as e:
@@ -73,7 +75,7 @@ class ConfigMgmt():
     """
     Return tables loaded in config for which YANG model does not exist.
     """
-    def tablesWithOutYang(self):
+    def tablesWithoutYang(self):
 
         return self.sy.tablesWithOutYang
 
@@ -83,7 +85,7 @@ class ConfigMgmt():
     def loadData(self, configdbJson):
         self.sy.loadData(configdbJson)
         # Raise if tables without YANG models are not allowed but exist.
-        if not self.allowTablesWithOutYang and len(self.sy.tablesWithOutYang):
+        if not self.allowTablesWithoutYang and len(self.sy.tablesWithOutYang):
             raise Exception('Config has tables without YANG models')
 
         return
@@ -169,11 +171,11 @@ class ConfigMgmt():
 """
 class ConfigMgmtDPB(ConfigMgmt):
 
-    def __init__(self, source="configDB", debug=False, allowTablesWithOutYang=True):
+    def __init__(self, source="configDB", debug=False, allowTablesWithoutYang=True):
 
         try:
             ConfigMgmt.__init__(self, source=source, debug=debug, \
-                allowTablesWithOutYang=allowTablesWithOutYang)
+                allowTablesWithoutYang=allowTablesWithoutYang)
             self.oidKey = 'ASIC_STATE:SAI_OBJECT_TYPE_PORT:oid:0x'
 
         except Exception as e:
@@ -557,7 +559,6 @@ class ConfigMgmtDPB(ConfigMgmt):
 
     def _updateDiffConfigDB(self):
 
-        # main code starts here
         try:
             # Get the Diff
             print('Generate Final Config to write in DB')
@@ -683,10 +684,6 @@ class ConfigMgmtDPB(ConfigMgmt):
             print("Create Config to load in DB, Failed")
             print(e)
             raise e
-
-        # if debug
-        #with open('configToLoad.json', 'w') as f:
-        #    dump(configToLoad, f, indent=4)
 
         return configToLoad
 
