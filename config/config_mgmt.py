@@ -59,11 +59,7 @@ class ConfigMgmt():
             else:
                 self.readConfigDBJson(source)
             # this will crop config, xlate and load.
-            self.sy.load_data(self.configdbJsonIn)
-
-            # Raise if tables without YANG models are not allowed but exist.
-            if not allowTablesWithOutYang and len(self.sy.tablesWithOutYang):
-                raise Exception('Config has tables without YANG models')
+            self.loadData(self.configdbJsonIn)
 
         except Exception as e:
             print(e)
@@ -422,7 +418,7 @@ class ConfigMgmtDPB(ConfigMgmt):
 
             # create a tree with merged config and validate, if validation is
             # sucessful, then configdbJsonOut contains final and valid config.
-            self.sy.load_data(self.configdbJsonOut)
+            self.loadData(self.configdbJsonOut)
             if self.validateConfigData()==False:
                 return configToLoad, False
 
