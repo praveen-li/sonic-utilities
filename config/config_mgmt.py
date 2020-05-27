@@ -92,7 +92,7 @@ class ConfigMgmt():
 
         return
 
-        """
+    """
     Validate current Data Tree
     """
     def validateConfigData(self):
