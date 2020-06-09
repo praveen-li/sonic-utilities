@@ -16,8 +16,6 @@ import ipaddress
 from swsssdk import ConfigDBConnector
 from swsssdk import SonicV2Connector
 from minigraph import parse_device_desc_xml
-from lib import VLAN_SUB_INTERFACE_SEPARATOR, get_interface_naming_mode
-from lib import interface_alias_to_name, interface_name_is_valid
 from config_mgmt import configMgmt
 
 import aaa
@@ -39,10 +37,13 @@ CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help', '-?'])
 SONIC_GENERATED_SERVICE_PATH = '/etc/sonic/generated_services.conf'
 SONIC_CFGGEN_PATH = '/usr/local/bin/sonic-cfggen'
 SYSLOG_IDENTIFIER = "config"
+PORT_STR = "Ethernet"
 INTF_KEY = "interfaces"
 
 (platform, hwsku) =  get_platform_and_hwsku()
 BREAKOUT_CFG_FILE = get_port_config_file_name(hwsku, platform)
+
+VLAN_SUB_INTERFACE_SEPARATOR = '.'
 
 INIT_CFG_FILE = '/etc/sonic/init_cfg.json'
 
@@ -192,6 +193,64 @@ def run_command(command, display_cmd=False, ignore_error=False):
         sys.exit(proc.returncode)
 
 
+def interface_alias_to_name(interface_alias):
+    """Return default interface name if alias name is given as argument
+    """
+    config_db = ConfigDBConnector()
+    config_db.connect()
+    port_dict = config_db.get_table('PORT')
+
+    vlan_id = ""
+    sub_intf_sep_idx = -1
+    if interface_alias is not None:
+        sub_intf_sep_idx = interface_alias.find(VLAN_SUB_INTERFACE_SEPARATOR)
+        if sub_intf_sep_idx != -1:
+            vlan_id = interface_alias[sub_intf_sep_idx + 1:]
+            # interface_alias holds the parent port name so the subsequent logic still applies
+            interface_alias = interface_alias[:sub_intf_sep_idx]
+
+    if interface_alias is not None:
+        if not port_dict:
+            click.echo("port_dict is None!")
+            raise click.Abort()
+        for port_name in port_dict.keys():
+            if interface_alias == port_dict[port_name]['alias']:
+                return port_name if sub_intf_sep_idx == -1 else port_name + VLAN_SUB_INTERFACE_SEPARATOR + vlan_id
+
+    # Interface alias not in port_dict, just return interface_alias, e.g.,
+    # portchannel is passed in as argument, which does not have an alias
+    return interface_alias if sub_intf_sep_idx == -1 else interface_alias + VLAN_SUB_INTERFACE_SEPARATOR + vlan_id
+
+
+def interface_name_is_valid(interface_name):
+    """Check if the interface name is valid
+    """
+    config_db = ConfigDBConnector()
+    config_db.connect()
+    port_dict = config_db.get_table('PORT')
+    port_channel_dict = config_db.get_table('PORTCHANNEL')
+    sub_port_intf_dict = config_db.get_table('VLAN_SUB_INTERFACE')
+
+    if get_interface_naming_mode() == "alias":
+        interface_name = interface_alias_to_name(interface_name)
+
+    if interface_name is not None:
+        if not port_dict:
+            click.echo("port_dict is None!")
+            raise click.Abort()
+        for port_name in port_dict.keys():
+            if interface_name == port_name:
+                return True
+        if port_channel_dict:
+            for port_channel_name in port_channel_dict.keys():
+                if interface_name == port_channel_name:
+                    return True
+        if sub_port_intf_dict:
+            for sub_port_intf_name in sub_port_intf_dict.keys():
+                if interface_name == sub_port_intf_name:
+                    return True
+    return False
+
 def interface_name_to_alias(interface_name):
     """Return alias interface name if default name is given as argument
     """
@@ -310,6 +369,13 @@ def set_interface_naming_mode(mode):
     f.write(newdata)
     f.close()
     click.echo("Please logout and log back in for changes take effect.")
+
+
+def get_interface_naming_mode():
+    mode = os.getenv('SONIC_CLI_IFACE_MODE')
+    if mode is None:
+        mode = "default"
+    return mode
 
 def _is_neighbor_ipaddress(ipaddress):
     """Returns True if a neighbor has the IP address <ipaddress>, False if not
@@ -1587,14 +1653,12 @@ def breakout(ctx, interface_name, mode, verbose, force_remove_dependencies, load
     # Get list of interfaces to be deleted
     del_ports = get_child_ports(interface_name, cur_brkout_mode, BREAKOUT_CFG_FILE)
     del_intf_dict = {intf: del_ports[intf]["speed"] for intf in del_ports}
-    del_intf_dict = {intf: del_ports[intf]["speed"] for intf in del_ports}
 
     if del_intf_dict:
         click.echo("\nPorts to be deleted : \n {}".format(json.dumps(del_intf_dict, indent=4)))
     else:
         click.secho("[ERROR] del_intf_dict is None! No interfaces are there to be deleted", fg='red')
         raise click.Abort()
-
 
     """ Interface Addition Logic """
     # Get list of interfaces to be added
@@ -1616,6 +1680,11 @@ def breakout(ctx, interface_name, mode, verbose, force_remove_dependencies, load
     # Remove the interface which remains unchanged from both del_intf_dict and add_intf_dict
     map(del_intf_dict.pop, matched_item)
     map(add_intf_dict.pop, matched_item)
+
+    # validate all del_ports before calling breakOutPort
+    for intf in del_intf_dict.keys():
+        if not interface_name_is_valid(intf):
+            raise Exception("Interface name {} is invalid")
 
     click.secho("\nFinal list of ports to be deleted : \n {} \nFinal list of ports to be added :  \n {}".format(json.dumps(del_intf_dict, indent=4), json.dumps(add_intf_dict, indent=4), fg='green', blink=True))
     if len(add_intf_dict.keys()) == 0:

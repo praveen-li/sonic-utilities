@@ -10,8 +10,6 @@ try:
     load_source('sonic_cfggen', '/usr/local/bin/sonic-cfggen')
     from sonic_cfggen import deep_update, FormatConverter, sort_data
     from swsssdk import ConfigDBConnector, SonicV2Connector, port_util
-    from lib import interface_name_is_valid
-
     from pprint import PrettyPrinter, pprint
     from json import dump, load, dumps, loads
     from sys import path as sysPath
@@ -234,11 +232,12 @@ class configMgmt():
             if_name_map, if_oid_map = port_util.get_interface_oid_map(dataBase)
             self.sysLog(syslog.LOG_DEBUG, 'if_name_map {}'.format(if_name_map))
 
-            # If we are here, then get ready to update the Config DB,
-            # shutdown the ports, Update deletion of Config,
-            # verify in Asic DB for port deletion,
-            # then update addition of ports in config DB.
-            self.shutdownIntf(delPorts)
+            # If we are here, then get ready to update the Config DB as below:
+            # -- shutdown the ports,
+            # -- Update deletion of ports in Config DB,
+            # -- verify Asic DB for port deletion,
+            # -- then update addition of ports in config DB.
+            self._shutdownIntf(delPorts)
             self.writeConfigDB(delConfigToLoad)
             # Verify in Asic DB,
             self.verifyAsicDB(db=dataBase, ports=delPorts, portMap=if_name_map, \
@@ -393,15 +392,14 @@ class configMgmt():
     Based on the list of Ports, create a dict to shutdown port, update Config DB.
     Input: [] of ports.
     """
-    def shutdownIntf(self, ports):
+    def _shutdownIntf(self, ports):
         """ shut down all the interfaces before deletion """
         shutDownConf = dict(); shutDownConf["PORT"] = dict()
         for intf in ports:
-            if not interface_name_is_valid(intf):
-                raise Exception("Interface name is invalid")
             shutDownConf["PORT"][intf] = {"admin_status": "down"}
+        self.sysLog(msg='shutdown Interfaces: {}'.format(shutDownConf))
+
         if len(shutDownConf["PORT"]):
-            self.sysLog(msg='shutdown Interfaces: {}'.format(shutDownConf))
             self.writeConfigDB(shutDownConf)
 
         return
