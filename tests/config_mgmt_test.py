@@ -78,6 +78,41 @@ class TestConfigMgmt(TestCase):
         self.dpb_port4_4x25G_2x50G_f_l(curConfig)
         return
 
+    def test_shutdownIntf_call(self):
+        '''
+        Verify that _shutdownIntf() is called with deleted ports while calling
+        breakOutPort()
+        '''
+        conf = dict(configDbJson)
+        cmdpb = self.config_mgmt_dpb(conf)
+
+        # create ARGS
+        dPorts, pJson = self.generate_args(portIdx=8, laneIdx=73, \
+            curMode='1x50G(2)+2x25G(2)', newMode='2x50G')
+
+        # Try to breakout and see if _shutdownIntf is called
+        deps, ret = cmdpb.breakOutPort(delPorts=dPorts, portJson=pJson, \
+            force=True, loadDefConfig=False)
+
+        # verify correct function call to writeConfigDB after _shutdownIntf()
+        assert cmdpb.writeConfigDB.call_count == 3
+        print(cmdpb.writeConfigDB.call_args_list[0])
+        (args, kwargs) = cmdpb.writeConfigDB.call_args_list[0]
+        print(args)
+
+        # in case of tuple also, we should have only one element
+        if type(args) == tuple:
+            args = args[0]
+        assert "PORT" in args
+
+        # {"admin_status": "down"} should be set for all ports in dPorts
+        assert len(args["PORT"]) == len(dPorts)
+        # each port should have {"admin_status": "down"}
+        for port in args["PORT"].keys():
+            assert args["PORT"][port]['admin_status'] == 'down'
+
+        return
+
     def tearDown(self):
         try:
             os.remove(config_mgmt.CONFIG_DB_JSON_FILE)
@@ -211,7 +246,7 @@ class TestConfigMgmt(TestCase):
             void
         '''
         calls = [call(delConfig), call(addConfig)]
-        assert cmdpb.writeConfigDB.call_count == 2
+        assert cmdpb.writeConfigDB.call_count == 3
         cmdpb.writeConfigDB.assert_has_calls(calls, any_order=False)
         return
 
@@ -479,7 +514,6 @@ class TestConfigMgmt(TestCase):
                 }
             }
         }
-        assert cmdpb.writeConfigDB.call_count == 2
         self.checkResult(cmdpb, delConfig, addConfig)
         self.postUpdateConfig(curConfig, delConfig, addConfig)
         return
