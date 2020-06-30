@@ -651,7 +651,6 @@ class ConfigMgmtDPB(ConfigMgmt):
 
             elif isinstance(outp, list):
                 # just take list from output
-                print("insert in List: {} {} {}".format(inp, outp, diff))
                 config.extend(outp)
                 # in config DB, empty lists are represented by [""]
                 if "" in config:
