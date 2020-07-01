@@ -17,7 +17,7 @@ import ipaddress
 from swsssdk import ConfigDBConnector
 from swsssdk import SonicV2Connector
 from minigraph import parse_device_desc_xml
-from config_mgmt import configMgmt
+from config_mgmt import ConfigMgmt, ConfigMgmtDPB
 
 import aaa
 import mlnx
@@ -151,16 +151,36 @@ def _validate_interface_mode(ctx, BREAKOUT_CFG_FILE, interface_name, target_brko
         sys.exit(0)
     return True
 
-def load_configMgmt(verbose):
+def load_ConfigMgmt(verbose):
     """ Load config for the commands which are capable of change in config DB. """
     try:
-        # TODO: set allowExtraTables to False, i.e we should have yang models for
-        # each table in Config. [TODO: Create Yang model for each Table]
-        # cm = configMgmt(debug=verbose, allowExtraTables=False)
-        cm = configMgmt(debug=verbose, allowExtraTables=True)
+        cm = ConfigMgmtDPB(debug=verbose)
         return cm
     except Exception as e:
         raise Exception("Failed to load the config. Error: {}".format(str(e)))
+
+"""
+Funtion to warn user about extra tables while Dynamic Port Breakout(DPB).
+confirm: re-confirm from user to proceed.
+Config Tables Without Yang model considered extra tables.
+cm =  instance of config MGMT class.
+"""
+def breakout_warnUser_extraTables(cm, final_delPorts, confirm=True):
+
+    try:
+        # check if any extra tables exist
+        eTables = cm.tablesWithOutYang()
+        if len(eTables):
+            # find relavent tables in extra tables, i.e. one which can have deleted
+            # ports
+            tables = cm.configWithKeys(configIn=eTables, keys=final_delPorts)
+            click.secho("Below Config can not be verified, It may cause harm "\
+                "to the system\n {}".format(json.dumps(tables, indent=2)))
+            click.confirm('Do you wish to Continue?', abort=True)
+    except Exception as e:
+        raise Exception("Failed in breakout_warnUser_extraTables. Error: {}".format(str(e)))
+
+    return
 
 def breakout_Ports(cm, delPorts=list(), addPorts=list(), portJson=dict(), \
     force=False, loadDefConfig=True, verbose=False):
@@ -640,7 +660,100 @@ def is_ipaddress(val):
         return False
     return True
 
+# class for locking entire config process
+class ConfigDbLock():
+    def __init__(self):
+        self.lockName = "LOCK|configDbLock"
+        self.timeout = 10
+        self.pid = os.getpid()
+        self.client = None
 
+        self._acquireLock()
+        return
+
+    def _acquireLock(self):
+        try:
+            # connect to db
+            db_kwargs = dict()
+            configdb = ConfigDBConnector(**db_kwargs)
+            configdb.connect()
+
+            self.client = configdb.get_redis_client('CONFIG_DB')
+            # Set lock and expire time. Process may get killed b/w set lock and
+            # expire call.
+            if self.client.hsetnx(self.lockName, "PID", self.pid):
+                self.client.expire(self.lockName, self.timeout)
+                log_debug(":::Lock Acquired:::")
+            # if lock exists but expire timer not running, run expire time and
+            # abort.
+            elif not self.client.ttl(self.lockName):
+                self.client.expire(self.lockName, self.timeout)
+                click.echo(":::Can not acquire lock, Reset Timer & Abort:::");
+                sys.exit(1)
+            else:
+                click.echo(":::Can not acquire lock, Abort:::");
+                sys.exit(1)
+        except Exception as e:
+            click.echo(":::Exception: {}:::".format(e))
+            sys.exit(1)
+        return
+
+    def reacquireLock(self):
+        try:
+            # Try to set lock first
+            if self.client.hsetnx(self.lockName, "PID", self.pid):
+                self.client.expire(self.lockName, self.timeout)
+                log_debug(":::Lock Reacquired:::")
+            # if lock exists, check who owns it
+            else:
+                p = self.client.pipeline(True)
+                # watch, we do not want to work on modified lock
+                p.watch(self.lockName)
+                # if current process holding then extend the timer
+                if p.hget(self.lockName, "PID") == str(self.pid):
+                    self.client.expire(self.lockName, self.timeout)
+                    log_debug(":::Lock Timer Extended:::");
+                    p.unwatch()
+                    return
+                else:
+                    # some other process is holding the lock.
+                    click.echo(":::Can not acquire lock LOCK PID: {} and self.pid:{}:::".\
+                        format(p.hget(self.lockName, "PID"), self.pid))
+                    p.unwatch()
+                    sys.exit(1)
+
+        except Exception as e:
+            click.echo(":::Exception: {}:::".format(e))
+            sys.exit(1)
+        return
+
+    def _releaseLock(self):
+        try:
+            p = self.client.pipeline(True)
+            # watch, we do not want to work on modified lock
+            p.watch(self.lockName)
+            # if current process holding the lock then release it.
+            if p.hget(self.lockName, "PID") == str(self.pid):
+                p.multi()
+                p.delete(self.lockName)
+                p.execute()
+                log_debug(":::Lock Released:::");
+                return
+            else:
+                # some other process s holding the lock.
+                log_debug(":::Lock PID: {} and self.pid:{}:::".\
+                    format(p.hget(self.lockName, "PID"), self.pid))
+            p.unwatch()
+        except Exception as e:
+            log_error("Exception: {}".format(e))
+        return
+
+    def __del__(self):
+        self._releaseLock()
+        return
+# end of class configdblock
+
+cdblock = ConfigDbLock()
 # This is our main entrypoint - the main 'config' command
 @click.group(context_settings=CONTEXT_SETTINGS)
 def config():
@@ -658,6 +771,8 @@ config.add_command(nat.nat)
 @click.argument('filename', default='/etc/sonic/config_db.json', type=click.Path())
 def save(filename):
     """Export current config DB to a file on disk."""
+    # reacquire lock after prompt
+    cdblock.reacquireLock()
     command = "{} -d --print-data > {}".format(SONIC_CFGGEN_PATH, filename)
     run_command(command, display_cmd=True)
 
@@ -701,11 +816,13 @@ def load(filename, yes, disable_validation):
     """Import a previous saved config DB dump file."""
     if not yes:
         click.confirm('Load config from the file %s?' % filename, abort=True)
+        # reacquire lock after prompt
+        cdblock.reacquireLock()
 
     # Verify config before config load
     if not disable_validation:
         try:
-            cm = configMgmt(source=filename)
+            cm = ConfigMgmt(source=filename)
             if cm.validateConfigData()==False:
                 raise(Exception('Config Validation Failed'))
         except Exception as e:
@@ -725,6 +842,8 @@ def reload(filename, yes, load_sysinfo, disable_validation):
     """Clear current configuration and import a previous saved config DB dump file."""
     if not yes:
         click.confirm('Clear current config and reload config from the file %s?' % filename, abort=True)
+        # reacquire lock after prompt
+        cdblock.reacquireLock()
 
     # Validating passed json configuration file
     command = "{} -j {} --check-config".format(SONIC_CFGGEN_PATH, filename)
@@ -744,7 +863,7 @@ def reload(filename, yes, load_sysinfo, disable_validation):
     # Verify config before stoping service
     if not disable_validation:
         try:
-            cm = configMgmt(source=filename)
+            cm = ConfigMgmt(source=filename)
             if cm.validateConfigData()==False:
                 raise(Exception('Config Validation Failed'))
         except Exception as e:
@@ -785,6 +904,8 @@ def reload(filename, yes, load_sysinfo, disable_validation):
 @click.argument('filename', default='/etc/sonic/device_desc.xml', type=click.Path(exists=True))
 def load_mgmt_config(filename):
     """Reconfigure hostname and mgmt interface based on device description file."""
+    # reacquire lock after prompt
+    cdblock.reacquireLock()
     command = "{} -M {} --write-to-db".format(SONIC_CFGGEN_PATH, filename)
     run_command(command, display_cmd=True)
     #FIXME: After config DB daemon for hostname and mgmt interface is implemented, we'll no longer need to do manual configuration here
@@ -807,6 +928,7 @@ def load_mgmt_config(filename):
 @click.option('-y', '--yes', is_flag=True, callback=_abort_if_false,
                 expose_value=False, prompt='Reload config from minigraph?')
 def load_minigraph():
+
     """Reconfigure based on minigraph."""
 
     # Validating config file
@@ -816,6 +938,8 @@ def load_minigraph():
         command = "{} -H -m --check-config".format(SONIC_CFGGEN_PATH)
 
     run_command(command, display_cmd=True)
+    # reacquire lock after prompt
+    cdblock.reacquireLock()
     log_info("'load_minigraph' executing...")
 
     # get the device type
@@ -1772,7 +1896,8 @@ def speed(ctx, interface_name, interface_speed, verbose):
 def breakout(ctx, interface_name, mode, verbose, force_remove_dependencies, load_predefined_config):
 
     """ Set interface breakout mode """
-
+    # reacquire lock after prompt
+    cdblock.reacquireLock()
     if not os.path.isfile(BREAKOUT_CFG_FILE) or not BREAKOUT_CFG_FILE.endswith('.json'):
         click.secho("[ERROR] Breakout feature is not available without platform.json file", fg='red')
         raise click.Abort()
@@ -1846,11 +1971,14 @@ def breakout(ctx, interface_name, mode, verbose, force_remove_dependencies, load
     # Start Interation with Dy Port BreakOut Config Mgmt
     try:
         """ Load config for the commands which are capable of change in config DB """
-        cm = load_configMgmt(verbose)
+        cm = load_ConfigMgmt(verbose)
 
-        """ Delete all ports if forced else print dependencies using configMgmt API """
+        """ Delete all ports if forced else print dependencies using ConfigMgmt API """
         final_delPorts = [intf for intf in del_intf_dict.keys()]
-        """ Add ports with its attributes using configMgmt API """
+        """ Warn user if tables without yang models exist and have final_delPorts """
+        breakout_warnUser_extraTables(cm, final_delPorts, confirm=True)
+        # prompt
+        """ Add ports with its attributes using ConfigMgmt API """
         final_addPorts = [intf for intf in port_dict.keys()]
         portJson = dict(); portJson['PORT'] = port_dict
         # breakout_Ports will abort operation on failure, So no need to check return
@@ -2603,6 +2731,8 @@ def ztp():
 @click.argument('run', required=False, type=click.Choice(["run"]))
 def run(run):
     """Restart ZTP of the device."""
+    # reacquire lock after prompt
+    cdblock.reacquireLock()
     command = "ztp run -y"
     run_command(command, display_cmd=True)
 
@@ -2612,6 +2742,8 @@ def run(run):
 @click.argument('disable', required=False, type=click.Choice(["disable"]))
 def disable(disable):
     """Administratively Disable ZTP."""
+    # reacquire lock after prompt
+    cdblock.reacquireLock()
     command = "ztp disable -y"
     run_command(command, display_cmd=True)
 

@@ -147,10 +147,9 @@ setup(
     # - tabulate
     install_requires=[
         'click-default-group',
-        'click',
-        'tabulate',
         'click==7.0.0',
-        'natsort'
+        'natsort',
+        'tabulate'
     ],
     setup_requires= [
         'pytest-runner'
