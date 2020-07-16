@@ -782,9 +782,9 @@ def check(ctx):
     "Verifies input configuration validity"
     pass
 
-@check.command()
+@check.command('json')
 @click.argument('filename', default='/etc/sonic/config_db.json', type=click.Path(exists=True))
-def json(filename):
+def json_file(filename):
     """Verifies json file configuration validity"""
 
     command = "{} -j {} --check-config".format(SONIC_CFGGEN_PATH, filename)
