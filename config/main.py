@@ -722,7 +722,7 @@ class ConfigDbLock():
                 p.execute()
                 return
             else:
-                # some other process s holding the lock. Do nothing.
+                # some other process is holding the lock. Do nothing.
                 pass
             p.unwatch()
         except Exception as e:
