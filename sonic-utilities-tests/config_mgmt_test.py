@@ -81,9 +81,10 @@ class TestConfigMgmt(TestCase):
         curConfig = dict(configDbJson)
         lock = {"LOCK": {"configDbLock": {"PID": "15555"}}}
         self.updateConfig(curConfig, lock)
+        prevLen = len(curConfig)
         cm = self.config_mgmt_dpb(curConfig)
         # Assert LOCK is removed from Input Config
-        assert len(cm.configdbJsonIn) == 5 and \
+        assert (len(cm.configdbJsonIn) ==  prevLen-1) and \
             'LOCK' not in cm.configdbJsonIn.keys()
         # Test by direct Call
         prevLen = len(curConfig)

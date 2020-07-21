@@ -163,7 +163,7 @@ def breakout_warnUser_extraTables(cm, final_delPorts, confirm=True):
     try:
         # check if any extra tables exist
         eTables = cm.tablesWithOutYang()
-        if eTables == None or len(eTables) == 0:
+        if len(eTables) == 0:
             return
         # let user know that extra tables exist in config
         click.secho("Below Table(s) can not be verified using YANG models:")
@@ -171,7 +171,7 @@ def breakout_warnUser_extraTables(cm, final_delPorts, confirm=True):
         # find relavent tables in extra tables, i.e. one which can have deleted
         # ports
         tables = cm.configWithKeys(configIn=eTables, keys=final_delPorts)
-        if tables != None and len(tables):
+        if len(tables):
             click.secho("Below Config in Unverified Table(s) may harm the system")
             click.secho("{}".format(json.dumps(tables, indent=2)))
             # Need to confirm if extra Tables have any deleted ports.
