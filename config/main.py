@@ -782,38 +782,6 @@ def save(filename):
     command = "{} -d --print-data > {}".format(SONIC_CFGGEN_PATH, filename)
     run_command(command, display_cmd=True)
 
-@config.group()
-@click.pass_context
-def check(ctx):
-    "Verifies input configuration validity"
-    pass
-
-@check.command('json')
-@click.argument('filename', default='/etc/sonic/config_db.json', type=click.Path(exists=True))
-def json_file(filename):
-    """Verifies json file configuration validity"""
-
-    command = "{} -j {} --check-config".format(SONIC_CFGGEN_PATH, filename)
-    run_command(command, display_cmd=True)
-    print "Valid configuration found in " + filename + " file"
-
-@check.command()
-@click.argument('filename', default='/etc/sonic/minigraph.xml', type=click.Path(exists=True))
-def minigraph(filename):
-    """Verifies minigraph file configuration validity"""
-
-    command = "{} -m {} --check-config".format(SONIC_CFGGEN_PATH, filename)
-    run_command(command, display_cmd=True)
-    print "Valid configuration found in " + filename + " file"
-
-@check.command()
-def database():
-    """Verifies configDB configuration validity"""
-
-    command = "{} -d --check-config".format(SONIC_CFGGEN_PATH)
-    run_command(command, display_cmd=True)
-    print "Valid configuration found in config database"
-
 @config.command()
 @click.option('-y', '--yes', is_flag=True)
 @click.option('-d', '--disable-validation', is_flag=True, help='Disable Config Validation using YANG')
@@ -851,9 +819,6 @@ def reload(filename, yes, load_sysinfo, disable_validation):
         # reacquire lock after prompt
         cdblock.reacquireLock()
 
-    # Validating passed json configuration file
-    command = "{} -j {} --check-config".format(SONIC_CFGGEN_PATH, filename)
-    run_command(command, display_cmd=True)
     log_info("'reload' executing...")
 
     if load_sysinfo:
@@ -936,14 +901,6 @@ def load_mgmt_config(filename):
 def load_minigraph():
 
     """Reconfigure based on minigraph."""
-
-    # Validating config file
-    if os.path.isfile('/etc/sonic/init_cfg.json'):
-        command = "{} -H -m -j /etc/sonic/init_cfg.json --check-config".format(SONIC_CFGGEN_PATH)
-    else:
-        command = "{} -H -m --check-config".format(SONIC_CFGGEN_PATH)
-
-    run_command(command, display_cmd=True)
     # reacquire lock after prompt
     cdblock.reacquireLock()
     log_info("'load_minigraph' executing...")
@@ -965,15 +922,11 @@ def load_minigraph():
     config_db.connect()
     client = config_db.get_redis_client(config_db.CONFIG_DB)
     client.flushdb()
-
-    # Proceeding with the changes
     if os.path.isfile('/etc/sonic/init_cfg.json'):
         command = "{} -H -m -j /etc/sonic/init_cfg.json --write-to-db".format(SONIC_CFGGEN_PATH)
     else:
         command = "{} -H -m --write-to-db".format(SONIC_CFGGEN_PATH)
-
     run_command(command, display_cmd=True)
-
     client.set(config_db.INIT_INDICATOR, 1)
     if device_type != 'MgmtToRRouter':
         run_command('pfcwd start_default', display_cmd=True)
