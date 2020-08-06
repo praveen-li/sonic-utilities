@@ -785,8 +785,9 @@ def save(filename):
 @config.command()
 @click.option('-y', '--yes', is_flag=True)
 @click.option('-d', '--disable-validation', is_flag=True, help='Disable Config Validation using YANG')
+@click.option('-v', '--verbose', is_flag=True, help="Enable verbose output")
 @click.argument('filename', default='/etc/sonic/config_db.json', type=click.Path(exists=True))
-def load(filename, yes, disable_validation):
+def load(filename, yes, disable_validation, verbose):
     """Import a previous saved config DB dump file."""
     if not yes:
         click.confirm('Load config from the file %s?' % filename, abort=True)
@@ -796,7 +797,7 @@ def load(filename, yes, disable_validation):
     # Verify config before config load
     if not disable_validation:
         try:
-            cm = ConfigMgmt(source=filename)
+            cm = ConfigMgmt(source=filename, debug=verbose)
             if cm.validateConfigData()==False:
                 raise(Exception('Config Validation Failed'))
         except Exception as e:
@@ -811,8 +812,9 @@ def load(filename, yes, disable_validation):
 @click.option('-y', '--yes', is_flag=True)
 @click.option('-d', '--disable-validation', is_flag=True, help='Disable Config Validation using YANG')
 @click.option('-l', '--load-sysinfo', is_flag=True, help='load system default information (mac, portmap etc) first.')
+@click.option('-v', '--verbose', is_flag=True, help="Enable verbose output")
 @click.argument('filename', default='/etc/sonic/config_db.json', type=click.Path(exists=True))
-def reload(filename, yes, load_sysinfo, disable_validation):
+def reload(filename, yes, load_sysinfo, disable_validation, verbose):
     """Clear current configuration and import a previous saved config DB dump file."""
     if not yes:
         click.confirm('Clear current config and reload config from the file %s?' % filename, abort=True)
@@ -834,7 +836,7 @@ def reload(filename, yes, load_sysinfo, disable_validation):
     # Verify config before stoping service
     if not disable_validation:
         try:
-            cm = ConfigMgmt(source=filename)
+            cm = ConfigMgmt(source=filename, debug=verbose)
             if cm.validateConfigData()==False:
                 raise(Exception('Config Validation Failed'))
         except Exception as e:
