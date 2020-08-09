@@ -1742,23 +1742,24 @@ if routing_stack == "quagga":
         """Start up BGP session by neighbor IP address or hostname"""
         _change_bgp_session_status(ipaddr_or_hostname, 'up', verbose)
 
+    #
+    # 'remove' subgroup ('config bgp remove ...')
+    #
+
+    @bgp.group()
+    def remove():
+        "Remove BGP neighbor configuration from the device"
+        pass
+
+    @remove.command('neighbor')
+    @click.argument('neighbor_ip_or_hostname', metavar='<neighbor_ip_or_hostname>', required=True)
+    def remove_neighbor(neighbor_ip_or_hostname):
+        """Deletes BGP neighbor configuration of given hostname or ip from devices"""
+        _remove_bgp_neighbor_config(neighbor_ip_or_hostname)
+
 elif routing_stack == "frr":
     from frr_config_bgp import bgp
     config.add_command(bgp)
-#
-# 'remove' subgroup ('config bgp remove ...')
-#
-
-@bgp.group()
-def remove():
-    "Remove BGP neighbor configuration from the device"
-    pass
-
-@remove.command('neighbor')
-@click.argument('neighbor_ip_or_hostname', metavar='<neighbor_ip_or_hostname>', required=True)
-def remove_neighbor(neighbor_ip_or_hostname):
-    """Deletes BGP neighbor configuration of given hostname or ip from devices"""
-    _remove_bgp_neighbor_config(neighbor_ip_or_hostname)
 
 #
 # 'interface' group ('config interface ...')
