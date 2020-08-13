@@ -1662,7 +1662,7 @@ if routing_stack == "quagga":
     ipv6.add_command(bgp)
 
 elif routing_stack == "frr":
-    
+
     @cli.command()
     @click.argument('bgp_args', nargs = -1, required = False)
     @click.option('--verbose', is_flag=True, help="Enable verbose output")
@@ -2483,7 +2483,7 @@ def show_sflow_global(config_db):
     click.echo("\n  {} Collectors configured:".format(len(sflow_info)))
     for collector_name in sorted(sflow_info.keys()):
         click.echo("    Name: {}".format(collector_name).ljust(30) +
-                   "IP addr: {}".format(sflow_info[collector_name]['collector_ip']).ljust(20) +
+                   "IP addr: {} ".format(sflow_info[collector_name]['collector_ip']).ljust(25) +
                    "UDP port: {}".format(sflow_info[collector_name]['collector_port']))
 
 
