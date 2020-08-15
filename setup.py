@@ -19,7 +19,7 @@ from setuptools import setup
 
 setup(
     name='sonic-utilities',
-    version='3.0.0',
+    version='3.0.1',
     description='Command-line utilities for SONiC',
     license='Apache 2.0',
     author='SONiC Team',
