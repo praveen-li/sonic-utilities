@@ -735,6 +735,13 @@ class ConfigDbLock():
 
     def _releaseLock(self):
         try:
+            """
+            If LOCK was never acquired, self.client should be None. This
+            happens with 'config ?' command
+            """
+            if self.client == None:
+                return
+
             p = self.client.pipeline(True)
             # watch, we do not want to work on modified lock
             p.watch(self.lockName)
