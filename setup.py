@@ -52,10 +52,11 @@ setup(
         'sonic-utilities-tests',
         'undebug',
         'utilities_common',
+        'watchdogutil',
     ],
     package_data={
         'show': ['aliases.ini'],
-        'sonic-utilities-tests': ['acl_input/*', 'mock_tables/*.py', 'mock_tables/*.json']
+        'sonic-utilities-tests': ['acl_input/*', 'mock_tables/*.py', 'mock_tables/*.json', 'filter_fdb_input/*']
     },
     scripts=[
         'scripts/aclshow',
@@ -75,10 +76,12 @@ setup(
         'scripts/fast-reboot-dump.py',
         'scripts/fdbclear',
         'scripts/fdbshow',
+        'scripts/filter_fdb_entries.py',
         'scripts/generate_dump',
         'scripts/intfutil',
         'scripts/intfstat',
         'scripts/lldpshow',
+        'scripts/mellanox_buffer_migrator.py',
         'scripts/mmuconfig',
         'scripts/natclear',
         'scripts/natconfig',
@@ -134,6 +137,7 @@ setup(
             'sonic-clear = clear.main:cli',
             'sonic_installer = sonic_installer.main:cli',
             'undebug = undebug.main:cli',
+            'watchdogutil = watchdogutil.main:watchdogutil',
         ]
     },
     # NOTE: sonic-utilities also depends on other packages that are either only

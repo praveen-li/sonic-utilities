@@ -13,12 +13,11 @@ import ipaddress
 import click
 from click_default_group import DefaultGroup
 from natsort import natsorted
-from tabulate import tabulate
-
-import sonic_device_util
+from sonic_py_common import device_info
 from swsssdk import ConfigDBConnector
 from sonic_device_util import get_system_routing_stack
 from swsssdk import SonicV2Connector
+from tabulate import tabulate
 
 import mlnx
 from collections import OrderedDict
@@ -32,6 +31,8 @@ SONIC_CFGGEN_PATH = '/usr/local/bin/sonic-cfggen'
 PORT_STR = "Ethernet"
 
 VLAN_SUB_INTERFACE_SEPARATOR = '.'
+
+config_db = None
 
 try:
     # noinspection PyPep8Naming
@@ -544,7 +545,10 @@ CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help', '-?'])
 @click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
 def cli():
     """SONiC command line - 'show' command"""
-    pass
+    global config_db
+
+    config_db = ConfigDBConnector()
+    config_db.connect()
 
 #
 # 'vrf' command ("show vrf")
@@ -639,17 +643,19 @@ def is_mgmt_vrf_enabled(ctx):
         cmd = 'sonic-cfggen -d --var-json "MGMT_VRF_CONFIG"'
 
         p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        res = p.communicate()
-        if p.returncode == 0:
-            p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try :
             mvrf_dict = json.loads(p.stdout.read())
+        except ValueError:
+            print("MGMT_VRF_CONFIG is not present.")
+            return False
 
-            # if the mgmtVrfEnabled attribute is configured, check the value
-            # and return True accordingly.
-            if 'mgmtVrfEnabled' in mvrf_dict['vrf_global']:
-                if (mvrf_dict['vrf_global']['mgmtVrfEnabled'] == "true"):
-                    #ManagementVRF is enabled. Return True.
-                    return True
+        # if the mgmtVrfEnabled attribute is configured, check the value
+        # and return True accordingly.
+        if 'mgmtVrfEnabled' in mvrf_dict['vrf_global']:
+            if (mvrf_dict['vrf_global']['mgmtVrfEnabled'] == "true"):
+                #ManagementVRF is enabled. Return True.
+                return True
+
     return False
 
 #
@@ -682,7 +688,7 @@ def mgmt_vrf(ctx,routes):
 # 'management_interface' group ("show management_interface ...")
 #
 
-@cli.group(cls=AliasedGroup, default_if_no_args=False)
+@cli.group(name='management_interface', cls=AliasedGroup, default_if_no_args=False)
 def management_interface():
     """Show management interface parameters"""
     pass
@@ -1160,7 +1166,7 @@ def stats(verbose):
     run_command(cmd, display_cmd=verbose)
 
 # 'naming_mode' subcommand ("show interfaces naming_mode")
-@interfaces.command()
+@interfaces.command('naming_mode')
 @click.option('--verbose', is_flag=True, help="Enable verbose output")
 def naming_mode(verbose):
     """Show interface naming_mode status"""
@@ -1655,7 +1661,6 @@ def protocol(verbose):
 # BGP commands are determined by the routing-stack being elected.
 #
 if routing_stack == "quagga":
-
     from .bgp_quagga_v4 import bgp
     ip.add_command(bgp)
     from .bgp_quagga_v6 import bgp
@@ -1684,7 +1689,6 @@ elif routing_stack == "frr":
         command = 'sudo vtysh -c "{}"'.format(debug_cmd)
         run_command(command)
 
-
 #
 # 'lldp' group ("show lldp ...")
 #
@@ -1700,13 +1704,13 @@ def lldp():
 @click.option('--verbose', is_flag=True, help="Enable verbose output")
 def neighbors(interfacename, verbose):
     """Show LLDP neighbors"""
-    cmd = "sudo lldpctl"
+    cmd = "sudo lldpshow -d"
 
     if interfacename is not None:
         if get_interface_mode() == "alias":
             interfacename = iface_alias_converter.alias_to_name(interfacename)
 
-        cmd += " {}".format(interfacename)
+        cmd += " -p {}".format(interfacename)
 
     run_command(cmd, display_cmd=verbose)
 
@@ -1727,20 +1731,13 @@ def get_hw_info_dict():
     This function is used to get the HW info helper function
     """
     hw_info_dict = {}
-    machine_info = sonic_device_util.get_machine_info()
-    platform = sonic_device_util.get_platform_info(machine_info)
-    config_db = ConfigDBConnector()
-    config_db.connect()
-    data = config_db.get_table('DEVICE_METADATA')
-    try:
-        hwsku = data['localhost']['hwsku']
-    except KeyError:
-        hwsku = "Unknown"
-    version_info = sonic_device_util.get_sonic_version_info()
-    asic_type = version_info['asic_type']
-    hw_info_dict['platform'] = platform
-    hw_info_dict['hwsku'] = hwsku
-    hw_info_dict['asic_type'] = asic_type
+
+    version_info = device_info.get_sonic_version_info()
+
+    hw_info_dict['platform'] = device_info.get_platform()
+    hw_info_dict['hwsku'] = device_info.get_hwsku()
+    hw_info_dict['asic_type'] = version_info['asic_type']
+
     return hw_info_dict
 
 @cli.group(cls=AliasedGroup, default_if_no_args=False)
@@ -1748,7 +1745,7 @@ def platform():
     """Show platform-specific hardware info"""
     pass
 
-version_info = sonic_device_util.get_sonic_version_info()
+version_info = device_info.get_sonic_version_info()
 if (version_info and version_info.get('asic_type') == 'mellanox'):
     platform.add_command(mlnx.mlnx)
 
@@ -1811,11 +1808,22 @@ def temperature():
     run_command(cmd)
 
 # 'firmware' subcommand ("show platform firmware")
-@platform.command()
-def firmware():
-    """Show firmware status information"""
-    cmd = "fwutil show status"
-    run_command(cmd)
+@platform.command(
+    context_settings=dict(
+        ignore_unknown_options=True,
+        allow_extra_args=True
+    ),
+    add_help_option=False
+)
+@click.argument('args', nargs=-1, type=click.UNPROCESSED)
+def firmware(args):
+    """Show firmware information"""
+    cmd = "fwutil show {}".format(" ".join(args))
+
+    try:
+        subprocess.check_call(cmd, shell=True)
+    except subprocess.CalledProcessError as e:
+        sys.exit(e.returncode)
 
 #
 # 'logging' command ("show logging")
@@ -1854,7 +1862,7 @@ def logging(process, lines, follow, verbose):
 @click.option("--verbose", is_flag=True, help="Enable verbose output")
 def version(verbose):
     """Show version information"""
-    version_info = sonic_device_util.get_sonic_version_info()
+    version_info = device_info.get_sonic_version_info()
     hw_info_dict = get_hw_info_dict()
     serial_number_cmd = "sudo decode-syseeprom -s"
     serial_number = subprocess.Popen(serial_number_cmd, shell=True, stdout=subprocess.PIPE)
@@ -2372,7 +2380,7 @@ def tacacs():
 #
 # 'mirror_session' command  ("show mirror_session ...")
 #
-@cli.command()
+@cli.command('mirror_session')
 @click.argument('session_name', required=False)
 @click.option('--verbose', is_flag=True, help="Enable verbose output")
 def mirror_session(session_name, verbose):
@@ -2644,7 +2652,7 @@ def line():
     return
 
 
-@cli.group(cls=AliasedGroup, default_if_no_args=False)
+@cli.group(name='warm_restart', cls=AliasedGroup, default_if_no_args=False)
 def warm_restart():
     """Show warm restart configuration and state"""
     pass
@@ -2894,54 +2902,372 @@ def ztp(status, verbose):
     run_command(cmd, display_cmd=verbose)
 
 #
-# show features
+# 'feature' group (show feature ...)
 #
-@cli.command('features')
-def features():
-    """Show status of optional features"""
-    config_db = ConfigDBConnector()
-    config_db.connect()
-    header = ['Feature', 'Status']
-    body = []
-    status_data = config_db.get_table('FEATURE')
-    for key in status_data.keys():
-        body.append([key, status_data[key]['status']])
-    click.echo(tabulate(body, header))
-
-#
-# 'container' group (show container ...)
-#
-@cli.group(name='container', invoke_without_command=False)
-def container():
-    """Show container"""
-    pass
-
-#
-# 'feature' group (show container feature ...)
-#
-@container.group(name='feature', invoke_without_command=False)
+@cli.group(name='feature', invoke_without_command=False)
 def feature():
-    """Show container feature"""
+    """Show feature status"""
     pass
 
 #
-# 'autorestart' subcommand (show container feature autorestart)
+# 'state' subcommand (show feature status)
 #
-@feature.command('autorestart', short_help="Show whether the auto-restart feature for container(s) is enabled or disabled")
-@click.argument('container_name', required=False)
-def autorestart(container_name):
+@feature.command('status', short_help="Show feature state")
+@click.argument('feature_name', required=False)
+def autorestart(feature_name):
+    header = ['Feature', 'State', 'AutoRestart']
+    body = []
+    feature_table = config_db.get_table('FEATURE')
+    if feature_name:
+        if feature_table and feature_table.has_key(feature_name):
+            body.append([feature_name, feature_table[feature_name]['state'], \
+                         feature_table[feature_name]['auto_restart']])
+        else:
+            click.echo("Can not find feature {}".format(feature_name))
+            sys.exit(1)
+    else:
+        for key in natsorted(feature_table.keys()):
+            body.append([key, feature_table[key]['state'], feature_table[key]['auto_restart']])
+    click.echo(tabulate(body, header))
+
+#
+# 'autorestart' subcommand (show feature autorestart)
+#
+@feature.command('autorestart', short_help="Show auto-restart state for a feature")
+@click.argument('feature_name', required=False)
+def autorestart(feature_name):
+    header = ['Feature', 'AutoRestart']
+    body = []
+    feature_table = config_db.get_table('FEATURE')
+    if feature_name:
+        if feature_table and feature_table.has_key(feature_name):
+            body.append([feature_name, feature_table[feature_name]['auto_restart']])
+        else:
+            click.echo("Can not find feature {}".format(feature_name))
+            sys.exit(1)
+    else:
+        for name in natsorted(feature_table.keys()):
+            body.append([name, feature_table[name]['auto_restart']])
+    click.echo(tabulate(body, header))
+
+#
+# 'vnet' command ("show vnet")
+#
+@cli.group(cls=AliasedGroup, default_if_no_args=False)
+def vnet():
+    """Show vnet related information"""
+    pass
+
+@vnet.command()
+@click.argument('vnet_name', required=True)
+def name(vnet_name):
+    """Show vnet name <vnet name> information"""
     config_db = ConfigDBConnector()
     config_db.connect()
-    header = ['Container Name', 'Status']
-    body = []
-    container_feature_table = config_db.get_table('CONTAINER_FEATURE')
-    if container_name:
-        if container_feature_table and container_feature_table.has_key(container_name):
-            body.append([container_name, container_feature_table[container_name]['auto_restart']])
-    else:
-        for name in container_feature_table.keys():
-            body.append([name, container_feature_table[name]['auto_restart']])
-    click.echo(tabulate(body, header))
+    header = ['vnet name', 'vxlan tunnel', 'vni', 'peer list']
+
+    # Fetching data from config_db for VNET
+    vnet_data = config_db.get_entry('VNET', vnet_name)
+
+    def tablelize(vnet_key, vnet_data):
+        table = []
+        if vnet_data:
+            r = []
+            r.append(vnet_key)
+            r.append(vnet_data.get('vxlan_tunnel'))
+            r.append(vnet_data.get('vni'))
+            r.append(vnet_data.get('peer_list'))
+            table.append(r)
+        return table
+
+    click.echo(tabulate(tablelize(vnet_name, vnet_data), header))
+
+@vnet.command()
+def brief():
+    """Show vnet brief information"""
+    config_db = ConfigDBConnector()
+    config_db.connect()
+    header = ['vnet name', 'vxlan tunnel', 'vni', 'peer list']
+
+    # Fetching data from config_db for VNET
+    vnet_data = config_db.get_table('VNET')
+    vnet_keys = natsorted(vnet_data.keys())
+
+    def tablelize(vnet_keys, vnet_data):
+        table = []
+        for k in vnet_keys:
+            r = []
+            r.append(k)
+            r.append(vnet_data[k].get('vxlan_tunnel'))
+            r.append(vnet_data[k].get('vni'))
+            r.append(vnet_data[k].get('peer_list'))
+            table.append(r)
+        return table
+
+    click.echo(tabulate(tablelize(vnet_keys, vnet_data), header))
+
+@vnet.command()
+@click.argument('vnet_alias', required=False)
+def alias(vnet_alias):
+    """Show vnet alias to name information"""
+    config_db = ConfigDBConnector()
+    config_db.connect()
+    header = ['Alias', 'Name']
+
+    # Fetching data from config_db for VNET
+    vnet_data = config_db.get_table('VNET')
+    vnet_keys = natsorted(vnet_data.keys())
+
+    def tablelize(vnet_keys, vnet_data, vnet_alias):
+        table = []
+        for k in vnet_keys:
+            r = []
+            if vnet_alias is not None:
+                if vnet_data[k].get('guid') == vnet_alias:
+                    r.append(vnet_data[k].get('guid'))
+                    r.append(k)
+                    table.append(r)
+                    return table
+                else:
+                    continue
+
+            r.append(vnet_data[k].get('guid'))
+            r.append(k)
+            table.append(r)
+        return table
+
+    click.echo(tabulate(tablelize(vnet_keys, vnet_data, vnet_alias), header))
+
+@vnet.command()
+def interfaces():
+    """Show vnet interfaces information"""
+    config_db = ConfigDBConnector()
+    config_db.connect()
+
+    header = ['vnet name', 'interfaces']
+
+    # Fetching data from config_db for interfaces
+    intfs_data = config_db.get_table("INTERFACE")
+    vlan_intfs_data = config_db.get_table("VLAN_INTERFACE")
+
+    vnet_intfs = {}
+    for k, v in intfs_data.items():
+        if 'vnet_name' in v:
+            vnet_name = v['vnet_name']
+            if vnet_name in vnet_intfs:
+                vnet_intfs[vnet_name].append(k)
+            else:
+                vnet_intfs[vnet_name] = [k]
+
+    for k, v in vlan_intfs_data.items():
+        if 'vnet_name' in v:
+            vnet_name = v['vnet_name']
+            if vnet_name in vnet_intfs:
+                vnet_intfs[vnet_name].append(k)
+            else:
+                vnet_intfs[vnet_name] = [k]
+
+    table = []
+    for k, v in vnet_intfs.items():
+        r = []
+        r.append(k)
+        r.append(",".join(natsorted(v)))
+        table.append(r)
+
+    click.echo(tabulate(table, header))
+
+@vnet.command()
+def neighbors():
+    """Show vnet neighbors information"""
+    config_db = ConfigDBConnector()
+    config_db.connect()
+
+    header = ['<vnet_name>', 'neighbor', 'mac_address', 'interfaces']
+
+    # Fetching data from config_db for interfaces
+    intfs_data = config_db.get_table("INTERFACE")
+    vlan_intfs_data = config_db.get_table("VLAN_INTERFACE")
+
+    vnet_intfs = {}
+    for k, v in intfs_data.items():
+        if 'vnet_name' in v:
+            vnet_name = v['vnet_name']
+            if vnet_name in vnet_intfs:
+                vnet_intfs[vnet_name].append(k)
+            else:
+                vnet_intfs[vnet_name] = [k]
+
+    for k, v in vlan_intfs_data.items():
+        if 'vnet_name' in v:
+            vnet_name = v['vnet_name']
+            if vnet_name in vnet_intfs:
+                vnet_intfs[vnet_name].append(k)
+            else:
+                vnet_intfs[vnet_name] = [k]
+
+    appl_db = SonicV2Connector()
+    appl_db.connect(appl_db.APPL_DB)
+
+    # Fetching data from appl_db for neighbors
+    nbrs = appl_db.keys(appl_db.APPL_DB, "NEIGH_TABLE*")
+    nbrs_data = {}
+    for nbr in nbrs if nbrs else []:
+        tbl, intf, ip = nbr.split(":", 2)
+        mac = appl_db.get(appl_db.APPL_DB, nbr, 'neigh')
+        if intf in nbrs_data:
+            nbrs_data[intf].append((ip, mac))
+        else:
+            nbrs_data[intf] = [(ip, mac)]
+
+    table = []
+    for k, v in vnet_intfs.items():
+        v = natsorted(v)
+        header[0] = k
+        table = []
+        for intf in v:
+            if intf in nbrs_data:
+                for ip, mac in nbrs_data[intf]:
+                    r = ["", ip, mac, intf]
+                    table.append(r)
+        click.echo(tabulate(table, header))
+        click.echo("\n")
+
+    if not bool(vnet_intfs):
+        click.echo(tabulate(table, header))
+
+@vnet.group()
+def routes():
+    """Show vnet routes related information"""
+    pass
+
+@routes.command()
+def all():
+    """Show all vnet routes"""
+    appl_db = SonicV2Connector()
+    appl_db.connect(appl_db.APPL_DB)
+
+    header = ['vnet name', 'prefix', 'nexthop', 'interface']
+
+    # Fetching data from appl_db for VNET ROUTES
+    vnet_rt_keys = appl_db.keys(appl_db.APPL_DB, "VNET_ROUTE_TABLE*")
+    vnet_rt_keys = natsorted(vnet_rt_keys) if vnet_rt_keys else []
+
+    table = []
+    for k in vnet_rt_keys:
+        r = []
+        r.extend(k.split(":", 2)[1:])
+        val = appl_db.get_all(appl_db.APPL_DB, k)
+        r.append(val.get('nexthop'))
+        r.append(val.get('ifname'))
+        table.append(r)
+
+    click.echo(tabulate(table, header))
+
+    click.echo("\n")
+
+    header = ['vnet name', 'prefix', 'endpoint', 'mac address', 'vni']
+
+    # Fetching data from appl_db for VNET TUNNEL ROUTES
+    vnet_rt_keys = appl_db.keys(appl_db.APPL_DB, "VNET_ROUTE_TUNNEL_TABLE*")
+    vnet_rt_keys = natsorted(vnet_rt_keys) if vnet_rt_keys else []
+
+    table = []
+    for k in vnet_rt_keys:
+        r = []
+        r.extend(k.split(":", 2)[1:])
+        val = appl_db.get_all(appl_db.APPL_DB, k)
+        r.append(val.get('endpoint'))
+        r.append(val.get('mac_address'))
+        r.append(val.get('vni'))
+        table.append(r)
+
+    click.echo(tabulate(table, header))
+
+@routes.command()
+def tunnel():
+    """Show vnet tunnel routes"""
+    appl_db = SonicV2Connector()
+    appl_db.connect(appl_db.APPL_DB)
+
+    header = ['vnet name', 'prefix', 'endpoint', 'mac address', 'vni']
+
+    # Fetching data from appl_db for VNET TUNNEL ROUTES
+    vnet_rt_keys = appl_db.keys(appl_db.APPL_DB, "VNET_ROUTE_TUNNEL_TABLE*")
+    vnet_rt_keys = natsorted(vnet_rt_keys) if vnet_rt_keys else []
+
+    table = []
+    for k in vnet_rt_keys:
+        r = []
+        r.extend(k.split(":", 2)[1:])
+        val = appl_db.get_all(appl_db.APPL_DB, k)
+        r.append(val.get('endpoint'))
+        r.append(val.get('mac_address'))
+        r.append(val.get('vni'))
+        table.append(r)
+
+    click.echo(tabulate(table, header))
+
+#
+# 'vxlan' command ("show vxlan")
+#
+@cli.group(cls=AliasedGroup, default_if_no_args=False)
+def vxlan():
+    """Show vxlan related information"""
+    pass
+
+@vxlan.command()
+@click.argument('vxlan_name', required=True)
+def name(vxlan_name):
+    """Show vxlan name <vxlan_name> information"""
+    config_db = ConfigDBConnector()
+    config_db.connect()
+    header = ['vxlan tunnel name', 'source ip', 'destination ip', 'tunnel map name', 'tunnel map mapping(vni -> vlan)']
+
+    # Fetching data from config_db for VXLAN TUNNEL
+    vxlan_data = config_db.get_entry('VXLAN_TUNNEL', vxlan_name)
+
+    table = []
+    if vxlan_data:
+        r = []
+        r.append(vxlan_name)
+        r.append(vxlan_data.get('src_ip'))
+        r.append(vxlan_data.get('dst_ip'))
+        vxlan_map_keys = config_db.keys(config_db.CONFIG_DB,
+                        'VXLAN_TUNNEL_MAP{}{}{}*'.format(config_db.KEY_SEPARATOR, vxlan_name, config_db.KEY_SEPARATOR))
+        if vxlan_map_keys:
+            vxlan_map_mapping = config_db.get_all(config_db.CONFIG_DB, vxlan_map_keys[0])
+            r.append(vxlan_map_keys[0].split(config_db.KEY_SEPARATOR, 2)[2])
+            r.append("{} -> {}".format(vxlan_map_mapping.get('vni'), vxlan_map_mapping.get('vlan')))
+        table.append(r)
+
+    click.echo(tabulate(table, header))
+
+@vxlan.command()
+def tunnel():
+    """Show vxlan tunnel information"""
+    config_db = ConfigDBConnector()
+    config_db.connect()
+    header = ['vxlan tunnel name', 'source ip', 'destination ip', 'tunnel map name', 'tunnel map mapping(vni -> vlan)']
+
+    # Fetching data from config_db for VXLAN TUNNEL
+    vxlan_data = config_db.get_table('VXLAN_TUNNEL')
+    vxlan_keys = natsorted(vxlan_data.keys())
+
+    table = []
+    for k in vxlan_keys:
+        r = []
+        r.append(k)
+        r.append(vxlan_data[k].get('src_ip'))
+        r.append(vxlan_data[k].get('dst_ip'))
+        vxlan_map_keys = config_db.keys(config_db.CONFIG_DB,
+                        'VXLAN_TUNNEL_MAP{}{}{}*'.format(config_db.KEY_SEPARATOR,k, config_db.KEY_SEPARATOR))
+        if vxlan_map_keys:
+            vxlan_map_mapping = config_db.get_all(config_db.CONFIG_DB, vxlan_map_keys[0])
+            r.append(vxlan_map_keys[0].split(config_db.KEY_SEPARATOR, 2)[2])
+            r.append("{} -> {}".format(vxlan_map_mapping.get('vni'), vxlan_map_mapping.get('vlan')))
+        table.append(r)
+
+    click.echo(tabulate(table, header))
 
 if __name__ == '__main__':
     cli()

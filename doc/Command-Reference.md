@@ -74,6 +74,7 @@
 * [Platform Component Firmware](#platform-component-firmware)
   * [Platform Component Firmware show commands](#platform-component-firmware-show-commands)
   * [Platform Component Firmware config commands](#platform-component-firmware-config-commands)
+  * [Platform Component Firmware vendor specific behaviour](#platform-component-firmware-vendor-specific-behaviour)
 * [Platform Specific Commands](#platform-specific-commands)
 * [PortChannels](#portchannels)
   * [PortChannel Show commands](#portchannel-show-commands)
@@ -97,6 +98,11 @@
     * [VLAN Config commands](#vlan-config-commands)
   * [FDB](#fdb)
     * [FDB show commands](#fdb-show-commands)
+* [VxLAN & Vnet](#vxlan--vnet)
+  * [VxLAN](#vxlan)
+    * [VxLAN show commands](#vxlan-show-commands)
+  * [Vnet](#vnet)
+    * [Vnet show commands](#vnet-show-commands)
 * [Warm Reboot](#warm-reboot)
 * [Warm Restart](#warm-restart)
   * [Warm Restart show commands](#warm-restart-show-commands)
@@ -703,6 +709,86 @@ This command displays the status of the device's power supply units
   -----  --------
   PSU 1  OK
   PSU 2  OK
+  ```
+
+**show platform fan**
+
+This command displays the status of the device's fans
+
+- Usage:
+  ```
+  show platform fan
+  ```
+
+- Example:
+  ```
+  admin@sonic:~$ show platform fan
+          FAN     Speed    Direction    Presence    Status          Timestamp
+  -----------  --------  -----------  ----------  --------  -----------------
+         fan1       34%       intake     Present        OK  20200302 06:58:56
+         fan2       43%       intake     Present        OK  20200302 06:58:56
+         fan3       38%       intake     Present        OK  20200302 06:58:56
+         fan4       49%       intake     Present        OK  20200302 06:58:57
+         fan5       38%      exhaust     Present        OK  20200302 06:58:57
+         fan6       48%      exhaust     Present        OK  20200302 06:58:57
+         fan7       39%      exhaust     Present        OK  20200302 06:58:57
+         fan8       48%      exhaust     Present        OK  20200302 06:58:57
+  ```
+
+**show platform temperature**
+
+This command displays the status of the device's thermal sensors
+
+- Usage:
+  ```
+  show platform temperature
+  ```
+
+- Example:
+  ```
+  admin@sonic:~$ show platform temperature
+                    NAME    Temperature    High Th    Low Th    Crit High Th    Crit Low Th    Warning          Timestamp
+  ----------------------  -------------  ---------  --------  --------------  -------------  ---------  -----------------
+       Ambient ASIC Temp           37.0      100.0       N/A           120.0            N/A      False  20200302 06:58:57
+   Ambient Fan Side Temp           28.5      100.0       N/A           120.0            N/A      False  20200302 06:58:57
+  Ambient Port Side Temp           31.0      100.0       N/A           120.0            N/A      False  20200302 06:58:57
+         CPU Core 0 Temp           36.0       87.0       N/A           105.0            N/A      False  20200302 06:59:57
+         CPU Core 1 Temp           38.0       87.0       N/A           105.0            N/A      False  20200302 06:59:57
+           CPU Pack Temp           38.0       87.0       N/A           105.0            N/A      False  20200302 06:59:57
+              PSU-1 Temp           28.0      100.0       N/A           120.0            N/A      False  20200302 06:59:58
+              PSU-2 Temp           28.0      100.0       N/A           120.0            N/A      False  20200302 06:59:58
+      xSFP module 1 Temp           31.5       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+      xSFP module 2 Temp           35.0       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+      xSFP module 3 Temp           32.0       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+      xSFP module 4 Temp           33.5       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+      xSFP module 5 Temp           34.0       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+      xSFP module 6 Temp           36.0       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+      xSFP module 7 Temp           33.5       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+      xSFP module 8 Temp           33.0       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+      xSFP module 9 Temp           32.0       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+     xSFP module 10 Temp           38.5       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+     xSFP module 11 Temp           38.0       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+     xSFP module 12 Temp           39.0       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+     xSFP module 13 Temp           35.5       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+     xSFP module 14 Temp           37.0       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+     xSFP module 15 Temp           36.0       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+     xSFP module 16 Temp           36.5       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+     xSFP module 17 Temp           32.0       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+     xSFP module 18 Temp           34.5       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+     xSFP module 19 Temp           30.0       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+     xSFP module 20 Temp           31.5       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+     xSFP module 21 Temp           34.0       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+     xSFP module 22 Temp           34.4       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+     xSFP module 23 Temp           34.0       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+     xSFP module 24 Temp           35.6       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+     xSFP module 25 Temp           38.0       70.0       N/A            90.0            N/A      False  20200302 06:59:57
+     xSFP module 26 Temp           32.2       70.0       N/A            90.0            N/A      False  20200302 06:59:58
+     xSFP module 27 Temp           39.0       70.0       N/A            90.0            N/A      False  20200302 06:59:58
+     xSFP module 28 Temp           30.1       70.0       N/A            90.0            N/A      False  20200302 06:59:58
+     xSFP module 29 Temp           32.0       70.0       N/A            90.0            N/A      False  20200302 06:59:58
+     xSFP module 30 Temp           35.3       70.0       N/A            90.0            N/A      False  20200302 06:59:58
+     xSFP module 31 Temp           31.0       70.0       N/A            90.0            N/A      False  20200302 06:59:58
+     xSFP module 32 Temp           39.5       70.0       N/A            90.0            N/A      False  20200302 06:59:58
   ```
 
 #### Transceivers
@@ -1521,6 +1607,38 @@ Optionally, you can specify an IP address in order to display only that particul
   Click [here](#Quagga-BGP-Show-Commands) to see the example for "show ip bgp neighbors" for Quagga.
 
 
+**show ip bgp network [[<ipv4-address>|<ipv4-prefix>] [(bestpath | multipath | longer-prefixes | json)]]
+
+This command displays all the details of IPv4 Border Gateway Protocol (BGP) prefixes.
+
+- Usage:
+
+
+  ```
+  show ip bgp network [[<ipv4-address>|<ipv4-prefix>] [(bestpath | multipath | longer-prefixes | json)]]
+  ```
+
+- Example:
+
+  NOTE: The "longer-prefixes" option is only available when a network prefix with a "/" notation is used.
+
+  ```
+  admin@sonic:~$ show ip bgp network
+
+  admin@sonic:~$ show ip bgp network 10.1.0.32 bestpath
+
+  admin@sonic:~$ show ip bgp network 10.1.0.32 multipath
+
+  admin@sonic:~$ show ip bgp network 10.1.0.32 json
+
+  admin@sonic:~$ show ip bgp network 10.1.0.32/32 bestpath
+
+  admin@sonic:~$ show ip bgp network 10.1.0.32/32 multipath
+
+  admin@sonic:~$ show ip bgp network 10.1.0.32/32 json
+
+  admin@sonic:~$ show ip bgp network 10.1.0.32/32 longer-prefixes
+  ```
 
 **show bgp ipv6 summary (Versions >= 201904 using default FRR routing stack)**
 
@@ -1588,6 +1706,41 @@ This command displays all the details of one particular IPv6 Border Gateway Prot
   ```
   Click [here](#Quagga-BGP-Show-Commands) to see the example for "show ip bgp summary" for Quagga.
 
+
+**show ipv6 bgp network [[<ipv6-address>|<ipv6-prefix>] [(bestpath | multipath | longer-prefixes | json)]]
+
+This command displays all the details of IPv6 Border Gateway Protocol (BGP) prefixes.  
+
+- Usage: 
+
+  
+  ```
+  show ipv6 bgp network [[<ipv6-address>|<ipv6-prefix>] [(bestpath | multipath | longer-prefixes | json)]]   
+  ```
+
+- Example:
+
+  NOTE: The "longer-prefixes" option is only available when a network prefix with a "/" notation is used.
+ 
+  ```
+  admin@sonic:~$ show ipv6 bgp network
+
+  admin@sonic:~$ show ipv6 bgp network fc00::72 bestpath 
+
+  admin@sonic:~$ show ipv6 bgp network fc00::72 multipath
+
+  admin@sonic:~$ show ipv6 bgp network fc00::72 json 
+
+  admin@sonic:~$ show ipv6 bgp network fc00::72/64 bestpath
+
+  admin@sonic:~$ show ipv6 bgp network fc00::72/64 multipath
+
+  admin@sonic:~$ show ipv6 bgp network fc00::72/64 json 
+
+  admin@sonic:~$ show ipv6 bgp network fc00::72/64 longer-prefixes
+  ```
+ 
+  
 
 
 **show route-map**
@@ -2308,7 +2461,7 @@ This sub-section explains the following list of configuration on the interfaces.
 
 From 201904 release onwards, the “config interface” command syntax is changed and the format is as follows:
 
-- config interface  interface_subcommand <interface_name>
+- config interface interface_subcommand <interface_name>
 i.e Interface name comes after the subcommand
 - Ex: config interface startup Ethernet63
 
@@ -2443,6 +2596,7 @@ This command is used to administratively shut down either the Physical interface
   *Versions <= 201811*
   ```
   config interface <interface_name> shutdown (for 201811- version)
+  ```
 
 - Example:
 
@@ -2470,6 +2624,7 @@ This command is used for administratively bringing up the Physical interface or 
   *Versions <= 201811*
   ```
   config interface <interface_name> startup (for 201811- version)
+  ```
 
 - Example:
 
@@ -2508,6 +2663,60 @@ Dynamic breakout feature is yet to be supported in SONiC and hence uses cannot c
 - Example (Versions <= 201811):
   ```
   admin@sonic:~$ sudo config interface Ethernet63 speed 40000
+
+  ```
+
+**config interface transceiver lpmode**
+
+This command is used to enable or disable low-power mode for an SFP transceiver
+
+- Usage:
+
+  ```
+  config interface transceiver lpmode <interface_name> (enable | disable)
+  ```
+
+- Examples:
+
+  ```
+  user@sonic~$ sudo config interface transceiver lpmode Ethernet0 enable
+  Enabling low-power mode for port Ethernet0...  OK
+
+  user@sonic~$ sudo config interface transceiver lpmode Ethernet0 disable
+  Disabling low-power mode for port Ethernet0...  OK
+  ```
+
+**config interface transceiver reset**
+
+This command is used to reset an SFP transceiver
+
+- Usage:
+
+  ```
+  config interface transceiver reset <interface_name>
+  ```
+
+- Examples:
+
+  ```
+  user@sonic~$ sudo config interface transceiver reset Ethernet0
+  Resetting port Ethernet0...  OK
+  ```
+
+**config interface mtu <interface_name> (Versions >= 201904)**
+
+This command is used to configure the mtu for the Physical interface. Use the value 1500 for setting max transfer unit size to 1500 bytes.
+
+- Usage:
+
+  *Versions >= 201904*
+  ```
+  config interface mtu <interface_name> <mtu_value>
+  ```
+
+- Example (Versions >= 201904):
+  ```
+  admin@sonic:~$ sudo config interface mtu Ethernet64 1500
   ```
 
 Go Back To [Beginning of the document](#) or [Beginning of this section](#interfaces)
@@ -2961,9 +3170,13 @@ NOTE: Management interface IP address and default route (or specific route) may 
 When user specifies the optional argument "-y" or "--yes", this command forces the loading without prompting the user for confirmation.
 If the argument is not specified, it prompts the user to confirm whether user really wants to load this configuration file.
 
+When user specifies the optional argument "-n" or "--no-service-restart", this command loads the configuration without restarting dependent services
+running on the device. One use case for this option is during boot time when config-setup service loads minigraph configuration and there is no services
+running on the device.
+
 - Usage:
   ```
-  config load_minigraph [-y|--yes]
+  config load_minigraph [-y|--yes] [-n|--no-service-restart]
   ```
 
 - Example:
@@ -2997,9 +3210,13 @@ NOTE: Management interface IP address and default route (or specific route) may 
 When user specifies the optional argument "-y" or "--yes", this command forces the loading without prompting the user for confirmation.
 If the argument is not specified, it prompts the user to confirm whether user really wants to load this configuration file.
 
+When user specifies the optional argument "-n" or "--no-service-restart", this command clear and loads the configuration without restarting dependent services
+running on the device. One use case for this option is during boot time when config-setup service loads existing old configuration and there is no services
+running on the device.
+
 - Usage:
   ```
-  config reload [-y|--yes] [-l|--load-sysinfo] [<filename>]
+  config reload [-y|--yes] [-l|--load-sysinfo] [<filename>] [-n|--no-service-restart]
   ```
 
 - Example:
@@ -3780,6 +3997,45 @@ Supported options:
 3. -i|--image - update FW using current/next SONiC image
 
 Note: the default option is --image=current (current/next values are taken from `sonic_installer list`)
+
+### Platform Component Firmware vendor specific behaviour
+
+#### Mellanox
+
+**CPLD update**
+
+On Mellanox platforms CPLD update can be done either for single or for all components at once.  
+The second approach is preferred. In this case an aggregated `vme` binary is used and  
+CPLD component can be specified arbitrary.
+
+- Example:
+```bash
+root@sonic:/home/admin# show platform firmware
+Chassis                 Module    Component    Version                  Description
+----------------------  --------  -----------  -----------------------  ----------------------------------------
+x86_64-mlnx_msn3800-r0  N/A       BIOS         0ACLH004_02.02.007_9600  BIOS - Basic Input/Output System
+                                  CPLD1        CPLD000000_REV0400       CPLD - Complex Programmable Logic Device
+                                  CPLD2        CPLD000000_REV0300       CPLD - Complex Programmable Logic Device
+                                  CPLD3        CPLD000000_REV0300       CPLD - Complex Programmable Logic Device
+                                  CPLD4        CPLD000000_REV0100       CPLD - Complex Programmable Logic Device
+
+root@sonic:/home/admin# BURN_VME="$(pwd)/FUI000091_Burn_SN3800_CPLD000120_REV0600_CPLD000165_REV0400_CPLD000166_REV0300_CPLD000167_REV0100.vme"
+root@sonic:/home/admin# REFRESH_VME="$(pwd)/FUI000091_Refresh_SN3800_CPLD000120_REV0600_CPLD000165_REV0400_CPLD000166_REV0300_CPLD000167_REV0100.vme"
+
+root@sonic:/home/admin# config platform firmware install chassis component CPLD1 fw -y ${BURN_VME}
+root@sonic:/home/admin# config platform firmware install chassis component CPLD1 fw -y ${REFRESH_VME}
+
+root@sonic:/home/admin# show platform firmware
+Chassis                 Module    Component    Version                  Description
+----------------------  --------  -----------  -----------------------  ----------------------------------------
+x86_64-mlnx_msn3800-r0  N/A       BIOS         0ACLH004_02.02.007_9600  BIOS - Basic Input/Output System
+                                  CPLD1        CPLD000000_REV0600       CPLD - Complex Programmable Logic Device
+                                  CPLD2        CPLD000000_REV0400       CPLD - Complex Programmable Logic Device
+                                  CPLD3        CPLD000000_REV0300       CPLD - Complex Programmable Logic Device
+                                  CPLD4        CPLD000000_REV0100       CPLD - Complex Programmable Logic Device
+```
+
+Note: the update will have the same effect if any of CPLD1/CPLD2/CPLD3/CPLD4 will be used
 
 Go Back To [Beginning of the document](#) or [Beginning of this section](#platform-component-firmware)
 
@@ -4952,6 +5208,188 @@ Clear the FDB table
   ```
 
 Go Back To [Beginning of the document](#) or [Beginning of this section](#vlan--FDB)
+
+## VxLAN & Vnet
+
+### VxLAN
+
+#### VxLAN show commands
+
+**show vxlan tunnel**
+
+This command displays brief information about all the vxlans configured in the device. It displays the vxlan tunnel name, source IP address, destination IP address (if configured), tunnel map name and mapping.
+
+- Usage:
+
+  ```
+  show vxlan tunnel
+  ```
+
+- Example:
+
+  ```
+  admin@sonic:~$ show vxlan tunnel
+  vxlan tunnel name    source ip    destination ip    tunnel map name    tunnel map mapping(vni -> vlan)
+  -------------------  -----------  ----------------  -----------------  ---------------------------------
+  tunnel1              10.10.10.10
+  tunnel2              10.10.10.10  20.10.10.10       tmap1              1234 -> 100
+  tunnel3              10.10.10.10  30.10.10.10       tmap2              1235 -> 200
+  ```
+
+**show vxlan name <vxlan_name>**
+
+This command displays <vlan_name> configuration.
+
+- Usage:
+
+  ```
+  show vxlan name <vxlan_name>
+  ```
+
+- Example:
+
+  ```
+  admin@sonic:~$ show vxlan name tunnel3
+  vxlan tunnel name    source ip    destination ip    tunnel map name    tunnel map mapping(vni -> vlan)
+  -------------------  -----------  ----------------  -----------------  ---------------------------------
+  tunnel3              10.10.10.10  30.10.10.10       tmap2              1235 -> 200
+  ```
+
+Go Back To [Beginning of the document](#) or [Beginning of this section](#vxlan--vnet)
+
+### Vnet
+
+#### Vnet show commands
+
+**show vnet brief**
+
+This command displays brief information about all the vnets configured in the device. It displays the vnet name, vxlan tunnel name, vni and peer list (if configured).
+
+- Usage:
+
+  ```
+  show vnet brief
+  ```
+
+- Example:
+
+  ```
+  admin@sonic:~$ show vnet brief
+  vnet name    vxlan tunnel      vni  peer list
+  -----------  --------------  -----  ------------------
+  Vnet_2000    tunnel1          2000
+  Vnet_3000    tunnel1          3000  Vnet_2000,Vnet4000
+  ```
+
+**show vnet name <vnet_name>**
+
+This command displays brief information about <vnet_name> configured in the device.
+
+- Usage:
+
+  ```
+  show vnet name <vnet_name>
+  ```
+
+- Example:
+
+  ```
+  admin@sonic:~$ show vnet name Vnet_3000
+  vnet name    vxlan tunnel      vni  peer list
+  -----------  --------------  -----  ------------------
+  Vnet_3000    tunnel1          3000  Vnet_2000,Vnet4000
+  ```
+
+**show vnet interfaces**
+
+This command displays vnet interfaces information about all the vnets configured in the device.
+
+- Usage:
+
+  ```
+  show vnet interfaces
+  ```
+
+- Example:
+
+  ```
+  admin@sonic:~$ show vnet interfaces
+  vnet name    interfaces
+  -----------  ------------
+  Vnet_2000    Ethernet1
+  Vnet_3000    Vlan2000
+  ```
+
+**show vnet neighbors**
+
+This command displays vnet neighbor information about all the vnets configured in the device. It displays the vnet name, neighbor IP address, neighbor mac address (if configured) and interface.
+
+- Usage:
+
+  ```
+  show vnet neighbors
+  ```
+
+- Example:
+
+  ```
+  admin@sonic:~$ show vnet neighbors
+  Vnet_2000    neighbor     mac_address    interfaces
+  -----------  -----------  -------------  ------------
+               11.11.11.11                 Ethernet1
+               11.11.11.12                 Ethernet1
+
+  Vnet_3000    neighbor     mac_address        interfaces
+  -----------  -----------  -----------------  ------------
+               20.20.20.20  aa:bb:cc:dd:ee:ff  Vlan2000
+  ```
+
+**show vnet routes all**
+
+This command displays all routes information about all the vnets configured in the device.
+
+- Usage:
+
+  ```
+  show vnet routes all
+  ```
+
+- Example:
+
+  ```
+  admin@sonic:~$ show vnet routes all
+  vnet name    prefix          nexthop    interface
+  -----------  --------------  ---------  -----------
+  Vnet_2000    100.100.3.0/24             Ethernet52
+  Vnet_3000    100.100.4.0/24             Vlan2000
+
+  vnet name    prefix          endpoint    mac address        vni
+  -----------  --------------  ----------  -----------------  -----
+  Vnet_2000    100.100.1.1/32  10.10.10.1
+  Vnet_3000    100.100.2.1/32  10.10.10.2  00:00:00:00:03:04
+  ```
+
+**show vnet routes tunnel**
+
+This command displays tunnel routes information about all the vnets configured in the device.
+
+- Usage:
+
+  ```
+  show vnet routes tunnel
+  ```
+
+- Example:
+
+  ```
+  admin@sonic:~$ show vnet routes tunnel
+  vnet name    prefix          endpoint    mac address        vni
+  -----------  --------------  ----------  -----------------  -----
+  Vnet_2000    100.100.1.1/32  10.10.10.1
+  Vnet_3000    100.100.2.1/32  10.10.10.2  00:00:00:00:03:04
+  ```
+
+Go Back To [Beginning of the document](#) or [Beginning of this section](#vxlan--vnet)
 
 ## Warm Reboot
 

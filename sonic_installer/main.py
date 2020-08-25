@@ -385,7 +385,7 @@ def list():
         click.echo(image)
 
 # Set default image for boot
-@cli.command()
+@cli.command('set_default')
 @click.argument('image')
 def set_default(image):
     """ Choose image to boot from by default """
@@ -395,7 +395,7 @@ def set_default(image):
 
 
 # Set image for next boot
-@cli.command()
+@cli.command('set_next_boot')
 @click.argument('image')
 def set_next_boot(image):
     """ Choose image for next reboot (one time action) """
@@ -430,7 +430,7 @@ def remove(image):
     remove_image(image)
 
 # Retrieve version from binary image file and print to screen
-@cli.command()
+@cli.command('binary_version')
 @click.argument('binary_image_path')
 def binary_version(binary_image_path):
     """ Get version from local binary image file """
@@ -461,7 +461,7 @@ def cleanup():
         click.echo("No image(s) to remove")
 
 # Upgrade docker image
-@cli.command()
+@cli.command('upgrade_docker')
 @click.option('-y', '--yes', is_flag=True, callback=abort_if_false,
         expose_value=False, prompt='New docker image will be installed, continue?')
 @click.option('--cleanup_image', is_flag=True, help="Clean up old docker image")
@@ -628,7 +628,7 @@ def upgrade_docker(container_name, url, cleanup_image, skip_check, tag, warm):
         sys.exit(1)
 
 # rollback docker image
-@cli.command()
+@cli.command('rollback_docker')
 @click.option('-y', '--yes', is_flag=True, callback=abort_if_false,
         expose_value=False, prompt='Docker image will be rolled back, continue?')
 @click.argument('container_name', metavar='<container_name>', required=True,

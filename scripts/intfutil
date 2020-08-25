@@ -32,6 +32,7 @@ PORT_OPER_STATUS = "oper_status"
 PORT_ADMIN_STATUS = "admin_status"
 PORT_SPEED = "speed"
 PORT_MTU_STATUS = "mtu"
+PORT_FEC = "fec"
 PORT_DESCRIPTION = "description"
 PORT_OPTICS_TYPE = "type"
 PORT_PFC_ASYM_STATUS = "pfc_asym"
@@ -288,7 +289,7 @@ def po_speed_dict(po_int_dict, appl_db):
         po_speed_dict = {}
         return po_speed_dict
 
-def appl_db_portchannel_status_get(appl_db, config_db, po_name, status_type, portchannel_speed_dict):
+def appl_db_portchannel_status_get(appl_db, config_db, po_name, status_type, portchannel_speed_dict, combined_int_to_vlan_po_dict=None):
     """
     Get the port status
     """
@@ -299,7 +300,10 @@ def appl_db_portchannel_status_get(appl_db, config_db, po_name, status_type, por
         status = portchannel_speed_dict[po_name]
         return status
     if status_type == "vlan":
-        status = "routed"
+        if combined_int_to_vlan_po_dict and po_name in combined_int_to_vlan_po_dict.keys():
+            status = "trunk"
+        else:
+            status = "routed"
         return status
     if status_type == "mtu":
         status = config_db.get(config_db.CONFIG_DB, po_table_id, status_type)
@@ -340,7 +344,7 @@ def appl_db_sub_intf_status_get(appl_db, config_db, front_panel_ports_list, port
 
 # ========================== interface-status logic ==========================
 
-header_stat = ['Interface', 'Lanes', 'Speed', 'MTU', 'Alias', 'Vlan', 'Oper', 'Admin', 'Type', 'Asym PFC']
+header_stat = ['Interface', 'Lanes', 'Speed', 'MTU', 'FEC', 'Alias', 'Vlan', 'Oper', 'Admin', 'Type', 'Asym PFC']
 header_stat_sub_intf = ['Sub port interface', 'Speed', 'MTU', 'Vlan', 'Admin', 'Type']
 
 class IntfStatus(object):
@@ -366,6 +370,7 @@ class IntfStatus(object):
                                 appl_db_port_status_get(self.appl_db, key, PORT_LANES_STATUS),
                                 appl_db_port_status_get(self.appl_db, key, PORT_SPEED),
                                 appl_db_port_status_get(self.appl_db, key, PORT_MTU_STATUS),
+                                appl_db_port_status_get(self.appl_db, key, PORT_FEC),
                                 appl_db_port_status_get(self.appl_db, key, PORT_ALIAS),
                                 config_db_vlan_port_keys_get(self.combined_int_to_vlan_po_dict, self.front_panel_ports_list, key),
                                 appl_db_port_status_get(self.appl_db, key, PORT_OPER_STATUS),
@@ -379,8 +384,9 @@ class IntfStatus(object):
                                 appl_db_portchannel_status_get(self.appl_db, self.config_db, po, PORT_LANES_STATUS, self.portchannel_speed_dict),
                                 appl_db_portchannel_status_get(self.appl_db, self.config_db, po, PORT_SPEED, self.portchannel_speed_dict),
                                 appl_db_portchannel_status_get(self.appl_db, self.config_db, po, PORT_MTU_STATUS, self.portchannel_speed_dict),
+                                appl_db_portchannel_status_get(self.appl_db, self.config_db, po, PORT_FEC, self.portchannel_speed_dict),
                                 appl_db_portchannel_status_get(self.appl_db, self.config_db, po, PORT_ALIAS, self.portchannel_speed_dict),
-                                appl_db_portchannel_status_get(self.appl_db, self.config_db, po, "vlan", self.portchannel_speed_dict),
+                                appl_db_portchannel_status_get(self.appl_db, self.config_db, po, "vlan", self.portchannel_speed_dict, self.combined_int_to_vlan_po_dict),
                                 appl_db_portchannel_status_get(self.appl_db, self.config_db, po, PORT_OPER_STATUS, self.portchannel_speed_dict),
                                 appl_db_portchannel_status_get(self.appl_db, self.config_db, po, PORT_ADMIN_STATUS, self.portchannel_speed_dict),
                                 appl_db_portchannel_status_get(self.appl_db, self.config_db, po, PORT_OPTICS_TYPE, self.portchannel_speed_dict),

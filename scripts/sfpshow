@@ -26,16 +26,22 @@ try:
 except KeyError:
     pass 
 
-qsfp_data_map = {'modelname': 'Vendor PN', 'vendor_oui': 'Vendor OUI',
+qsfp_data_map = {'model': 'Vendor PN',
+                 'vendor_oui': 'Vendor OUI',
                  'vendor_date': 'Vendor Date Code(YYYY-MM-DD Lot)',
-                 'manufacturename': 'Vendor Name',
-                 'hardwarerev': 'Vendor Rev', 'serialnum': 'Vendor SN',
-                 'type': 'Identifier', 'ext_identifier': 'Extended Identifier',
+                 'manufacturer': 'Vendor Name',
+                 'hardware_rev': 'Vendor Rev',
+                 'serial': 'Vendor SN',
+                 'type': 'Identifier',
+                 'ext_identifier': 'Extended Identifier',
                  'ext_rateselect_compliance': 'Extended RateSelect Compliance',
-                 'cable_length': 'cable_length', 'cable_type': 'Length',
+                 'cable_length': 'cable_length',
+                 'cable_type': 'Length',
                  'nominal_bit_rate': 'Nominal Bit Rate(100Mbs)',
-                 'specification_compliance':'Specification compliance',
-                 'encoding': 'Encoding', 'Connector': 'Connector' 
+                 'specification_compliance': 'Specification compliance',
+                 'encoding': 'Encoding',
+                 'connector': 'Connector',
+                 'application_advertisement': 'Application Advertisement'
                  }
 
 sfp_dom_channel_monitor_map = {'rx1power': 'RXPower',
@@ -143,7 +149,7 @@ class SFPShow(object):
         ident = '        '
         seperator = ": "
         for key in sorted_key_table:
-            if dom_info_dict is not None and dom_info_dict[key] != 'N/A':
+            if dom_info_dict is not None and key in dom_info_dict and dom_info_dict[key] != 'N/A':
                 current_val = (ident + ident +
                         dom_value_map[key])
                 current_val = (current_val + seperator.rjust(len(seperator) +
@@ -258,11 +264,14 @@ class SFPShow(object):
             elif key1 == 'cable_length':
                 pass
             elif key1 == 'specification_compliance':
-                spefic_compliance_dict = eval(sfp_info_dict['specification_compliance'])
-                sorted_compliance_key_table = natsorted(spefic_compliance_dict)
-                out_put = out_put + ident + qsfp_data_map['specification_compliance'] + ': ' + '\n'
-                for compliance_key in sorted_compliance_key_table:
-                    out_put = out_put + ident + ident + compliance_key + ': ' + spefic_compliance_dict[compliance_key] + '\n'
+                if sfp_info_dict['type'] == "QSFP-DD Double Density 8X Pluggable Transceiver":
+                    out_put = out_put + ident + qsfp_data_map[key1] + ': ' + sfp_info_dict[key1] + '\n'
+                else:
+                    out_put = out_put + ident + qsfp_data_map['specification_compliance'] + ': ' + '\n'
+                    spefic_compliance_dict = eval(sfp_info_dict['specification_compliance'])
+                    sorted_compliance_key_table = natsorted(spefic_compliance_dict)
+                    for compliance_key in sorted_compliance_key_table:
+                        out_put = out_put + ident + ident + compliance_key + ': ' + spefic_compliance_dict[compliance_key] + '\n'
             else:
                 out_put = out_put + ident + qsfp_data_map[key1] + ': ' + sfp_info_dict[key1] + '\n'
 
