@@ -127,7 +127,7 @@ class ConfigMgmt():
                 void
         """
         # nonConfigTables should not be considered in Input Config.
-        nonConfigTables = ['LOCK']
+        nonConfigTables = ['LOCK', 'BREAKOUT_CFG']
         for t in nonConfigTables:
             if t in config.keys():
                 self.sysLog(msg='Filtering {}'.format(t))
