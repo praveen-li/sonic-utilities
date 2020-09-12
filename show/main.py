@@ -15,7 +15,6 @@ from click_default_group import DefaultGroup
 from natsort import natsorted
 from sonic_py_common import device_info
 from swsssdk import ConfigDBConnector
-from sonic_device_util import get_system_routing_stack
 from swsssdk import SonicV2Connector
 from tabulate import tabulate
 
@@ -172,9 +171,8 @@ class AliasedGroup(DefaultGroup):
             return DefaultGroup.get_command(self, ctx, matches[0])
         ctx.fail('Too many matches: %s' % ', '.join(sorted(matches)))
 
-
 # Global Routing-Stack variable
-routing_stack = get_system_routing_stack()
+routing_stack = device_info.get_system_routing_stack()
 
 # Read given JSON file
 def readJsonFile(fileName):

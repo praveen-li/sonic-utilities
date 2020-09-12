@@ -4,7 +4,7 @@ import click
 import os
 import subprocess
 from click_default_group import DefaultGroup
-from sonic_device_util import get_system_routing_stack
+from sonic_py_common import device_info
 
 try:
     # noinspection PyPep8Naming
@@ -82,7 +82,7 @@ class AliasedGroup(DefaultGroup):
 
 
 # Global Routing-Stack variable
-routing_stack = get_system_routing_stack()
+routing_stack = device_info.get_system_routing_stack()
 
 
 def run_command(command, pager=False, return_output=False):

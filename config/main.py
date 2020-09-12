@@ -16,7 +16,7 @@ import time
 
 from minigraph import parse_device_desc_xml
 from config_mgmt import ConfigMgmt, ConfigMgmtDPB
-from sonic_device_util import get_system_routing_stack
+from sonic_py_common import device_info
 from sonic_py_common import device_info, logger
 from swsssdk import ConfigDBConnector, SonicV2Connector, SonicDBConfig
 
@@ -1988,7 +1988,7 @@ def del_vlan_dhcp_relay_destination(ctx, vid, dhcp_relay_destination_ip):
     else:
         ctx.fail("{} is not a DHCP relay destination for {}".format(dhcp_relay_destination_ip, vlan_name))
 
-routing_stack = get_system_routing_stack()
+routing_stack = device_info.get_system_routing_stack()
 
 if routing_stack == "quagga":
     #

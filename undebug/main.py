@@ -5,7 +5,7 @@ import click
 import os
 import subprocess
 from click_default_group import DefaultGroup
-from sonic_device_util import get_system_routing_stack
+from sonic_py_common import device_info
 from pprint import pprint
 
 def run_command(command, pager=False):
@@ -32,7 +32,7 @@ def cli():
 # Inserting 'undebug' functionality into cli's parse-chain. Undebugging commands
 # are determined by the routing-stack being elected.
 #
-routing_stack = get_system_routing_stack()
+routing_stack = device_info.get_system_routing_stack()
 
 if routing_stack == "quagga":
 
