@@ -541,12 +541,14 @@ CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help', '-?'])
 # This is our entrypoint - the main "show" command
 # TODO: Consider changing function name to 'show' for better understandability
 @click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
-def cli():
+@click.pass_context
+def cli(ctx):
     """SONiC command line - 'show' command"""
     global config_db
 
     config_db = ConfigDBConnector()
     config_db.connect()
+    ctx.obj = {'db': config_db}
 
 #
 # 'vrf' command ("show vrf")
@@ -2414,11 +2416,8 @@ def policer(policer_name, verbose):
 @click.pass_context
 def sflow(ctx):
     """Show sFlow related information"""
-    config_db = ConfigDBConnector()
-    config_db.connect()
-    ctx.obj = {'db': config_db}
     if ctx.invoked_subcommand is None:
-        show_sflow_global(config_db)
+        show_sflow_global(ctx.obj['db'])
 
 #
 # 'sflow command ("show sflow interface ...")
