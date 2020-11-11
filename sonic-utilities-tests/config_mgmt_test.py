@@ -1,13 +1,18 @@
-import imp
 import os
-# import file under test i.e. config_mgmt.py
-imp.load_source('config_mgmt', \
-    os.path.join(os.path.dirname(__file__), '..', 'config', 'config_mgmt.py'))
-import config_mgmt
 
 from unittest import TestCase
 from mock import MagicMock, call
 from json import dump
+from imp import load_source
+from swsssdk import ConfigDBConnector
+
+# import file under test i.e. config_mgmt.py
+load_source('config_mgmt', \
+    os.path.join(os.path.dirname(__file__), '..', 'config', 'config_mgmt.py'))
+import config_mgmt
+
+load_source('sonic_cfggen', '/usr/local/bin/sonic-cfggen')
+from sonic_cfggen import deep_update, FormatConverter
 
 class TestConfigMgmt(TestCase):
     '''
@@ -74,6 +79,7 @@ class TestConfigMgmt(TestCase):
         self.dpb_port8_1x100G_1x50G_2x25G_f_l(curConfig)
         # Ethernet4: breakout from 4x25G to 2x50G with -f -l
         self.dpb_port4_4x25G_2x50G_f_l(curConfig)
+
         return
 
     def test_extra_lock_tables_cases(self):
@@ -116,6 +122,70 @@ class TestConfigMgmt(TestCase):
 
         return
 
+    def test_verifyAppDB_call(self):
+        '''
+        Verify that verifyAppDB() is called with deleted ports while calling
+        breakOutPort()
+        '''
+        conf = dict(configDbJson)
+        cmdpb = self.config_mgmt_dpb(conf)
+        print(conf['PORT'])
+        # create ARGS
+        dPorts, aPorts, pJson = self.generate_args(portIdx=8, laneIdx=73, \
+            curMode='1x50G(2)+2x25G(2)', newMode='2x50G')
+        # Try to breakout and see if verifyAppDB is called
+        cmdpb.breakOutPort(delPorts=dPorts, addPorts=aPorts, portJson=pJson, \
+            force=True, loadDefConfig=False)
+        print(conf['PORT'])
+
+        # verify correct function call
+        assert cmdpb._verifyAppDB.call_count == 1
+        print(cmdpb._verifyAppDB.call_args_list[0])
+        fargs = cmdpb._verifyAppDB.call_args_list[0].kwargs
+        print(fargs)
+        assert len(fargs) == 3
+        assert fargs['ports'] == dPorts
+        return
+
+    def test_verifyAppDB_success(self):
+        '''
+            Verify that verifyAppDB() return False, is any deleted port is up
+            in APPL_DB. And return success when all delPorts are admin down.
+        '''
+        curConfig = dict(configDbJson)
+        self.writeJson(curConfig, config_mgmt.CONFIG_DB_JSON_FILE)
+        cmdpb = config_mgmt.ConfigMgmtDPB(source=config_mgmt.CONFIG_DB_JSON_FILE)
+
+        # Bit of hack here, we use ConfigDBConnector to connect to APPL_DB
+        # So that we can update oper_status in PORT_TABLE of APPL_DB.
+        db = ConfigDBConnector()
+        db.db_connect('APPL_DB')
+        db.connect = MagicMock(return_value=True)
+        # get dPorts
+        dPorts, _, _ = self.generate_args(portIdx=8, laneIdx=73, \
+            curMode='4x25G', newMode='2x50G')
+        # Make sure _verifyAppDB raises Exception
+        try:
+            ret = cmdpb._verifyAppDB(db, dPorts, 3)
+        except Exception as e:
+            assert 'Ports are not Operation Down in App DB' in str(e)
+        # set ports 8, 9, 10 admin down
+        self.update_db(db, {'PORT_TABLE': {'Ethernet8': {'oper_status': 'down'}}})
+        self.update_db(db, {'PORT_TABLE': {'Ethernet9': {'oper_status': 'down'}}})
+        self.update_db(db, {'PORT_TABLE': {'Ethernet10': {'oper_status': 'down'}}})
+        # Make sure _verifyAppDB raises Exception even with 1 port up/None
+        try:
+            ret = cmdpb._verifyAppDB(db, dPorts, 3)
+        except Exception as e:
+            assert 'Ports are not Operation Down in App DB' in str(e)
+        # set ports 11 admin down
+        self.update_db(db, {'PORT_TABLE': {'Ethernet11': {'oper_status': 'down'}}})
+        # Make sure _verifyAppDB ret True
+        ret = cmdpb._verifyAppDB(db, dPorts, 3)
+        assert ret == True
+
+        return
+
     def tearDown(self):
         try:
             os.remove(config_mgmt.CONFIG_DB_JSON_FILE)
@@ -125,6 +195,12 @@ class TestConfigMgmt(TestCase):
         return
 
     ########### HELPER FUNCS #####################################
+    def update_db(self, db, tables):
+        data = dict()
+        deep_update(data, FormatConverter.to_deserialized(tables))
+        db.mod_config(FormatConverter.output_to_db(data))
+        return
+
     def writeJson(self, d, file):
         with open(file, 'w') as f:
             dump(d, f, indent=4)
@@ -146,6 +222,7 @@ class TestConfigMgmt(TestCase):
         cmdpb = config_mgmt.ConfigMgmtDPB(source=config_mgmt.CONFIG_DB_JSON_FILE)
         # mock funcs
         cmdpb.writeConfigDB = MagicMock(return_value=True)
+        cmdpb._verifyAppDB = MagicMock(return_value=True)
         cmdpb.verifyAsicDB = MagicMock(return_value=True)
         cmdpb._shutdownIntf = MagicMock(return_value=True)
         import mock_tables.dbconnector

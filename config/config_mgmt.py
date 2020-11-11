@@ -203,6 +203,77 @@ class ConfigMgmtDPB(ConfigMgmt):
     def __del__(self):
         pass
 
+    def _testRedisCliAppDb(self, key):
+        # To Debug and testing
+        if self.DEBUG:
+            cmd = 'sudo redis-cli -n 0 hget {} oper_status'.format(key)
+            self.sysLog(syslog.LOG_DEBUG, "Running {}".format(cmd))
+            print(cmd)
+            system(cmd)
+        return
+
+    def _checkPortsDownAppDb(self, db, ports):
+        '''
+        Check APP DB for PORT oper status down
+        @param: db = database, ports = port list
+        @return: True, if all ports are down.
+        '''
+        try:
+            # connect to APP DB,
+            db.connect(db.APPL_DB)
+            for port in ports:
+                # Key format "PORT_TABLE:Ethernet112"
+                key = 'PORT_TABLE:{}'.format(port)
+                portOperStatus = db.get('APPL_DB', key, 'oper_status')
+                self.sysLog(syslog.LOG_DEBUG, "APPL_DB: {} {}".\
+                    format(key, portOperStatus))
+                if portOperStatus is not None and portOperStatus == 'down':
+                    # Test via redis-cli
+                    self._testRedisCliAppDb(key)
+                else:
+                    return False
+
+        except Exception as e:
+            print(e)
+            return False
+
+        return True
+
+    def _verifyAppDB(self, db, ports, timeout):
+        '''
+        Verify in the App DB that ports are oper_status down,
+        Keep on trying till timeout period.
+        @param: db = database, ports, timeout
+        @return: Exception or True
+        '''
+
+        print("Verify Port oper_status down from App DB, Wait...")
+        self.sysLog(msg="Verify Port oper_status down from App DB, Wait...")
+
+        try:
+            for waitTime in range(timeout):
+                self.sysLog(msg='Check App DB: {} try'.format(waitTime+1))
+                # checkPortsDownAppDb will return True if all ports are Oper
+                # down in APP DB
+                if self._checkPortsDownAppDb(db, ports):
+                    break
+                tsleep(1)
+
+            # raise if timer expired
+            if waitTime + 1 == timeout:
+                print("!!! Critical Failure, Ports are not yet Operation Down in \
+                    App DB, Bail Out !!!")
+                self.sysLog(syslog.LOG_CRIT, "!!! Critical Failure, Ports are not \
+                    yet Operation Down in App DB, Bail Out !!!")
+                raise(Exception("Ports are not Operation Down in App DB after {} secs"\
+                    .format(timeout)))
+
+        except Exception as e:
+            print("_verifyAppDB failed {}".format(str(e)))
+            raise e
+
+        return True
+
     """
       Check if a key exists in ASIC DB or not.
     """
@@ -311,18 +382,19 @@ class ConfigMgmtDPB(ConfigMgmt):
 
             # If we are here, then get ready to update the Config DB as below:
             # -- shutdown the ports,
+            # -- verify App DB for port status,
             # -- Update deletion of ports in Config DB,
             # -- verify Asic DB for port deletion,
             # -- then update addition of ports in config DB.
             self._shutdownIntf(delPorts)
+            self._verifyAppDB(db=dataBase, ports=delPorts, timeout=MAX_WAIT)
             self.writeConfigDB(delConfigToLoad)
-            # Verify in Asic DB,
             self.verifyAsicDB(db=dataBase, ports=delPorts, portMap=if_name_map, \
                 timeout=MAX_WAIT)
             self.writeConfigDB(addConfigtoLoad)
 
         except Exception as e:
-            print(e)
+            print(e )
             return None, False
 
         return None, True
